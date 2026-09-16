@@ -2,7 +2,7 @@
   "name": "riderhub",
   "version": "1.0.0",
   "private": true,
-  "description": "RiderHub \u2014 motorcycle companion PWA. Root scripts for setup and running both apps.",
+  "description": "RiderHub — motorcycle companion PWA. Root scripts for setup and running both apps.",
   "type": "module",
   "scripts": {
     "setup": "node --no-deprecation scripts/setup.mjs",
@@ -21,7 +21,8 @@
     "emulators": "firebase emulators:start --only auth,firestore",
     "brand:icons": "node scripts/brand-icons.mjs",
     "test:workflow": "node tests/phase38.mjs",
-    "deploy:api": "firebase deploy --only functions"
+    "deploy:api": "firebase deploy --only functions",
+    "secrets:push": "node scripts/push-secrets.mjs"
   },
   "engines": {
     "node": ">=18"

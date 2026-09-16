@@ -57,9 +57,22 @@ and push from GitHub Desktop; every push to `main` deploys.
 The function declares these three by name, so the deploy looks each one up and stops if
 it is missing. Create all three before running the workflow.
 
-Google Cloud Console → *Security → Secret Manager* → *Create secret*, three times
-(if the page offers to enable the API, accept). The **name must match exactly**, the
-value is the raw key or token, and every other option stays at its default:
+All three values are already in your local `backend/.env`, so the quickest way is to
+copy them across with one command:
+
+```
+gcloud auth login          # only if it says your login has expired
+npm run secrets:push       # reads backend/.env, creates what is missing
+```
+
+It is safe to re-run, and it is also how you rotate a key later: change the value in
+`backend/.env`, run it again, deploy. Nothing is printed, and the values never pass
+through the shell.
+
+By hand instead: Google Cloud Console → *Security → Secret Manager* → *Create secret*,
+three times (if the page offers to enable the API, accept). The **name must match
+exactly**, the value is the raw key or token, every other option stays at its default.
+Watch for a trailing space when pasting — the console keeps it:
 
 | Secret name | Value |
 |---|---|
