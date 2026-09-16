@@ -1,0 +1,166 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #252835;
+  --accent: #f97316;
+  --accent2: #3b82f6;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: #2d3148;
+  --danger: #ef4444;
+  --radius: 12px;
+  --topbar-h: 52px;
+  --bottombar-h: 58px;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+
+/* ── SCREENS ── */
+.screen { position: fixed; inset: 0; display: none; }
+.screen.active { display: flex; }
+
+/* ── LANDING ── */
+#screen-landing { align-items: center; justify-content: center; background: linear-gradient(135deg, #0f1117 0%, #1a1d27 100%); }
+
+.landing-wrap { width: 100%; max-width: 420px; padding: 24px 20px; display: flex; flex-direction: column; gap: 32px; }
+
+.logo { text-align: center; }
+.logo-icon { font-size: 52px; display: block; margin-bottom: 8px; }
+.logo h1 { font-size: 28px; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; }
+.logo p { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+input[type="text"] {
+  width: 100%; padding: 13px 16px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); font-size: 15px; outline: none;
+  transition: border-color .2s;
+}
+input[type="text"]:focus { border-color: var(--accent); }
+input[type="text"]::placeholder { color: var(--text-muted); }
+
+.btn-group { display: flex; flex-direction: column; gap: 12px; }
+.btn { padding: 13px; border-radius: 8px; border: none; cursor: pointer; font-size: 15px; font-weight: 600; transition: opacity .2s, transform .1s; }
+.btn:active { transform: scale(.98); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--accent2); color: #fff; padding: 13px 18px; flex-shrink: 0; }
+.btn:hover { opacity: .9; }
+
+.divider { text-align: center; color: var(--text-muted); font-size: 13px; }
+
+.join-row { display: flex; gap: 10px; }
+.join-row input { flex: 1; text-transform: uppercase; letter-spacing: 2px; font-weight: 700; }
+
+.error-msg { color: var(--danger); font-size: 13px; min-height: 18px; text-align: center; }
+
+/* ── MAP SCREEN ── */
+#screen-map { flex-direction: column; }
+
+#topbar {
+  height: var(--topbar-h); background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; z-index: 1000; flex-shrink: 0;
+}
+#topbar-left { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.logo-small { font-size: 20px; }
+#room-code-display { color: var(--accent); letter-spacing: 2px; }
+
+#topbar-right { display: flex; gap: 6px; }
+
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); cursor: pointer; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s;
+}
+.icon-btn:hover { background: var(--border); }
+.icon-btn.danger { border-color: var(--danger); color: var(--danger); }
+
+#map {
+  flex: 1;
+  z-index: 1;
+}
+
+#bottom-bar {
+  height: var(--bottombar-h); background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-around;
+  padding: 0 12px; z-index: 1000; flex-shrink: 0;
+}
+.bar-btn {
+  padding: 10px 18px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); cursor: pointer; font-size: 13px; font-weight: 600;
+  transition: background .2s;
+}
+.bar-btn:hover { background: var(--border); }
+
+/* ── RIDERS PANEL ── */
+.panel {
+  position: absolute; bottom: var(--bottombar-h); left: 0; right: 0;
+  background: var(--surface); border-top: 1px solid var(--border);
+  z-index: 1001; max-height: 50vh; overflow-y: auto;
+  border-radius: var(--radius) var(--radius) 0 0;
+  transform: translateY(0); transition: transform .25s ease;
+}
+.panel.hidden { transform: translateY(110%); }
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  font-weight: 600; font-size: 15px;
+}
+#riders-list { padding: 8px 0; }
+
+.rider-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; transition: background .15s;
+}
+.rider-row:hover { background: var(--surface2); }
+.rider-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 2px solid rgba(255,255,255,.3); }
+.rider-name { font-size: 14px; flex: 1; }
+.rider-you { font-size: 11px; color: var(--text-muted); background: var(--surface2); padding: 2px 7px; border-radius: 99px; }
+.rider-status { font-size: 11px; color: var(--text-muted); }
+
+/* ── DESTINATION BANNER ── */
+.banner {
+  position: absolute; top: calc(var(--topbar-h) + 10px);
+  left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #fff;
+  padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 600;
+  z-index: 1002; white-space: nowrap; display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.4);
+}
+.banner.hidden { display: none; }
+
+.small-btn {
+  background: rgba(255,255,255,.25); border: none; color: #fff;
+  padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+
+/* ── TOAST ── */
+#toast {
+  position: absolute; bottom: calc(var(--bottombar-h) + 16px);
+  left: 50%; transform: translateX(-50%);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); padding: 10px 20px; border-radius: 99px;
+  font-size: 13px; z-index: 2000; opacity: 0;
+  transition: opacity .3s; pointer-events: none; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+
+/* ── LEAFLET OVERRIDES ── */
+.leaflet-container { background: #1a1d27; }
+.leaflet-control-zoom a { background: var(--surface2) !important; color: var(--text) !important; border-color: var(--border) !important; }
+
+/* Custom marker label */
+.rider-label {
+  background: rgba(15,17,23,.85); color: #fff;
+  border: none; border-radius: 6px; padding: 2px 7px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  pointer-events: none;
+}

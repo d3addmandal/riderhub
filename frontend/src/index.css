@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Themes.
+ *
+ * Every colour is a channel triplet so Tailwind can apply opacity to it. The dark set is
+ * the default on :root; the light set is applied either by an explicit choice
+ * (data-theme="light") or, when the rider has left it on "system", by the phone's own
+ * setting. The explicit attribute always wins over the media query, which is why the
+ * media rule is guarded against data-theme="dark".
+ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: 15 17 23;
+  --c-surface: 26 29 39;
+  --c-surface2: 37 40 53;
+  --c-border: 45 49 72;
+  --c-ink: 241 245 249;
+  --c-muted: 148 163 184;
+  --c-scrollbar: 45 49 72;
+  --c-shadow: 0 0 0;
+  /* The lip under a surface button — clearly darker than the face. */
+  --c-edge: 9 11 17;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --c-bg: 245 246 250;
+  --c-surface: 255 255 255;
+  --c-surface2: 238 241 247;
+  --c-border: 214 220 232;
+  --c-ink: 17 22 33;
+  --c-muted: 90 102 124;
+  --c-scrollbar: 200 207 221;
+  --c-shadow: 30 40 60;
+  --c-edge: 186 194 209;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) {
+    color-scheme: light;
+    --c-bg: 245 246 250;
+    --c-surface: 255 255 255;
+    --c-surface2: 238 241 247;
+    --c-border: 214 220 232;
+    --c-ink: 17 22 33;
+    --c-muted: 90 102 124;
+    --c-scrollbar: 200 207 221;
+    --c-shadow: 30 40 60;
+    --c-edge: 186 194 209;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: rgb(var(--c-bg));
+  color: rgb(var(--c-ink));
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Safe area insets for notch phones */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Scrollable areas */
+.scroll-y {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A horizontally scrolling row of choices, without a bar eating the touch target. */
+.chip-row {
+  display: flex;
+  gap: 0.375rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.chip-row::-webkit-scrollbar { display: none; }
+
+/* Native controls follow the theme rather than the OS default. */
+select option {
+  background-color: rgb(var(--c-surface2));
+  color: rgb(var(--c-ink));
+}
+input[type='checkbox'], input[type='radio'] { accent-color: #f97316; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-scrollbar)); border-radius: 2px; }
+
+/*
+ * Raised buttons.
+ *
+ * `--edge` is the colour of the button's own bottom face, so each variant keeps its own
+ * hue instead of everything sitting on the same grey lip.
+ *
+ * The top highlight is a layered background-image rather than an ::after overlay. An
+ * overlay would need `position: relative`, and because these rules come after
+ * @tailwind utilities that declaration wins over Tailwind's own `.fixed` and
+ * `.absolute` — which silently drops any positioned button back into normal flow.
+ * A gradient layers over `background-color` and needs no positioning at all.
+ */
+.btn3d {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.20), rgb(255 255 255 / 0) 48%);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+  box-shadow: 0 3px 0 0 var(--edge, rgb(var(--c-border))),
+              0 4px 6px -1px rgb(var(--c-shadow) / 0.35);
+}
+.btn3d:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.07);
+  box-shadow: 0 4px 0 0 var(--edge, rgb(var(--c-border))),
+              0 7px 12px -2px rgb(var(--c-shadow) / 0.42);
+}
+.btn3d:active:not(:disabled) {
+  /* Travels down onto its own edge — the edge shrinks to nothing. */
+  transform: translateY(3px);
+  filter: brightness(0.97);
+  box-shadow: 0 0 0 0 var(--edge, rgb(var(--c-border))),
+              0 1px 2px 0 rgb(var(--c-shadow) / 0.4);
+}
+.btn3d:disabled {
+  transform: none;
+  box-shadow: 0 2px 0 0 var(--edge, rgb(var(--c-border)));
+}
+
+.btn3d-accent  { --edge: #a4490b; }
+.btn3d-primary { --edge: #1e4fa8; }
+.btn3d-danger  { --edge: #a52222; }
+.btn3d-surface { --edge: rgb(var(--c-edge)); }
+
+/*
+ * Clearance for the floating SOS button.
+ *
+ * It hovers above the bottom nav, so without this the last row of any scrolling page
+ * ends up underneath it — and in the garage that was the Bike shortcut, covered by SOS
+ * and untappable. Padding the inner wrapper of a page scroller lets content scroll clear
+ * of it instead. Modals use .scroll-y too, hence the `main >` prefix.
+ */
+main > .scroll-y > :first-child {
+  padding-bottom: 5.5rem;
+}

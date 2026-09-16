@@ -1,0 +1,17 @@
+
+# Secrets and build output — never commit these.
+.env
+.env.local
+.env.*.local
+frontend/.env
+backend/.env
+node_modules/
+dist/
+*.log
+.firebase/
+
+# Firebase emulator logs
+*-debug.log
+
+# Legacy Python prototype
+__pycache__/

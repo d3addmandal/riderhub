@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>BikerTrack — Ride Together</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- ── LANDING SCREEN ── -->
+  <div id="screen-landing" class="screen active">
+    <div class="landing-wrap">
+      <div class="logo">
+        <span class="logo-icon">🏍️</span>
+        <h1>BikerTrack</h1>
+        <p>Ride together, stay connected</p>
+      </div>
+      <div class="card">
+        <input id="input-name" type="text" placeholder="Your rider name" maxlength="20" autocomplete="off" />
+        <div class="btn-group">
+          <button id="btn-create" class="btn btn-primary">Create Group</button>
+          <div class="divider">— or —</div>
+          <div class="join-row">
+            <input id="input-room" type="text" placeholder="Room code (e.g. AB12CD)" maxlength="6" autocomplete="off" />
+            <button id="btn-join" class="btn btn-secondary">Join</button>
+          </div>
+        </div>
+        <p id="landing-error" class="error-msg"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAP SCREEN ── -->
+  <div id="screen-map" class="screen">
+
+    <!-- Top bar -->
+    <div id="topbar">
+      <div id="topbar-left">
+        <span class="logo-small">🏍️</span>
+        <span id="room-label">Room: <strong id="room-code-display"></strong></span>
+      </div>
+      <div id="topbar-right">
+        <button id="btn-copy-code" class="icon-btn" title="Copy room code">📋</button>
+        <button id="btn-toggle-panel" class="icon-btn" title="Riders">👥</button>
+        <button id="btn-leave" class="icon-btn danger" title="Leave">✕</button>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div id="map"></div>
+
+    <!-- Bottom toolbar -->
+    <div id="bottom-bar">
+      <button id="btn-center-me" class="bar-btn" title="Center on me">📍 Me</button>
+      <button id="btn-set-dest" class="bar-btn" title="Set destination">🏁 Destination</button>
+      <button id="btn-center-all" class="bar-btn" title="Fit all riders">👥 All</button>
+    </div>
+
+    <!-- Riders panel (slide-up) -->
+    <div id="riders-panel" class="panel hidden">
+      <div class="panel-header">
+        <span>Riders in group</span>
+        <button id="btn-close-panel" class="icon-btn">✕</button>
+      </div>
+      <div id="riders-list"></div>
+    </div>
+
+    <!-- Destination mode banner -->
+    <div id="dest-banner" class="banner hidden">
+      Tap the map to set destination &nbsp;
+      <button id="btn-cancel-dest" class="small-btn">Cancel</button>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "No composite indexes required. Every list query in the API filters by equality only",
+    "(user_id, and optionally motorcycle_id / doc_type / is_active) and sorts in memory,",
+    "which Firestore serves from its automatic single-field indexes.",
+    "",
+    "This is deliberate: a rider holds tens to hundreds of documents, so sorting server-side",
+    "costs nothing, and the app can never break because indexes were not deployed.",
+    "'My rides' uses member_ids array-contains on rideGroups rather than a collection-group",
+    "query on members, for the same reason.",
+    "",
+    "If a future feature needs a real composite index, add it here and run",
+    "`npm run deploy:indexes` (service account) or `firebase deploy --only firestore:indexes`."
+  ],
+  "indexes": [],
+  "fieldOverrides": []
+}

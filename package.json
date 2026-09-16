@@ -1,0 +1,28 @@
+{
+  "name": "riderhub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RiderHub — motorcycle companion PWA. Root scripts for setup and running both apps.",
+  "type": "module",
+  "scripts": {
+    "setup": "node --no-deprecation scripts/setup.mjs",
+    "doctor": "node --no-deprecation scripts/doctor.mjs",
+    "telegram": "node --no-deprecation scripts/telegram.mjs",
+    "dev": "node scripts/dev.mjs",
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "deploy:indexes": "node --no-deprecation scripts/deploy-indexes.mjs",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:web": "npm --prefix frontend run build && node tests/phase31.mjs . && node tests/phase36.mjs frontend/dist && firebase deploy --only hosting",
+    "deploy:preview": "npm --prefix frontend run build && firebase hosting:channel:deploy preview --expires 7d",
+    "serve:web": "npm --prefix frontend run build && firebase emulators:start --only hosting,firestore --project riderhub-test --config firebase.emutest.json",
+    "test:hosting": "node tests/phase37.mjs http://[::1]:27350 http://[::1]:27360 riderhub-test",
+    "test:hosting:prod": "node tests/phase37.mjs https://fly-with-pegasus.web.app",
+    "emulators": "firebase emulators:start --only auth,firestore",
+    "brand:icons": "node scripts/brand-icons.mjs",
+    "test:workflow": "node tests/phase38.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

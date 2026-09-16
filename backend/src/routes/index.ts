@@ -1,0 +1,32 @@
+import { Router } from 'express';
+import configRouter from './config';
+import usersRouter from './users';
+import bikesRouter from './bikes';
+import groupsRouter from './groups';
+import fuelRouter from './fuel';
+import servicesRouter from './services';
+import maintenanceRouter from './maintenance';
+import ridesRouter from './rides';
+import routingRouter from './routing';
+import placesRouter from './places';
+import documentsRouter from './documents';
+import remindersRouter from './reminders';
+import analyticsRouter from './analytics';
+import sosRouter from './sos';
+
+export const router = Router();
+
+router.use('/config', configRouter);
+router.use('/users', usersRouter);
+router.use('/bikes', bikesRouter);
+router.use('/groups', groupsRouter);
+router.use('/fuel', fuelRouter);
+router.use('/services', servicesRouter);
+router.use('/maintenance', maintenanceRouter);
+router.use('/rides', ridesRouter);
+router.use('/routing', routingRouter);
+router.use('/places', placesRouter);
+router.use('/documents', documentsRouter);
+router.use('/reminders', remindersRouter);
+router.use('/analytics', analyticsRouter);
+router.use('/sos', sosRouter);

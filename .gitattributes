@@ -1,0 +1,6 @@
+# Keep LF in the repository regardless of the Windows checkout setting;
+# the GitHub Actions runner and the Oracle box are Linux.
+* text=auto eol=lf
+*.png binary
+*.webp binary
+*.jpg binary
