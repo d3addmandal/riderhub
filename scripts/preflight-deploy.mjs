@@ -17,10 +17,13 @@ if (!PROJECT) { console.error('usage: node scripts/preflight-deploy.mjs <project
 
 const KEY_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const IAM = `https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}`;
+// Everything goes to stdout, including failures: GitHub interleaves the two streams by
+// arrival, so a diagnosis split across both arrives shuffled — the verdict printing
+// above the facts it was drawn from. The non-zero exit is what marks the step failed.
 const fail = (title, ...lines) => {
-  console.error(`\n✖ ${title}\n`);
-  for (const l of lines) console.error(`  ${l}`);
-  console.error('');
+  console.log(`\n✖ ${title}\n`);
+  for (const l of lines) console.log(`  ${l}`);
+  console.log('');
   process.exit(1);
 };
 
