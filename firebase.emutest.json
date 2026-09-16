@@ -9,7 +9,14 @@
     "cleanUrls": true,
     "rewrites": [
       {
-        "regex": "^/(?:[^a].*|a(?:[^p].*)?|ap(?:[^i].*)?|api[^/].*)?$",
+        "source": "/api/**",
+        "function": {
+          "functionId": "api",
+          "region": "asia-south1"
+        }
+      },
+      {
+        "source": "**",
         "destination": "/index.html"
       }
     ],

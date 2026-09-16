@@ -8,7 +8,13 @@ dotenv.config();
 // account, and this app must stay free to run — so the documents vault tracks expiry
 // metadata only, with no file uploads. Auth and Firestore remain free on Spark.
 
-const projectId = process.env.FIREBASE_PROJECT_ID;
+// Inside Cloud Functions the project id arrives in FIREBASE_CONFIG / GCLOUD_PROJECT and
+// the runtime already carries credentials, so no key is needed there at all. The
+// FIREBASE_* variables below are only for a dev machine (or any other host).
+const runningInFunctions = Boolean(process.env.K_SERVICE || process.env.FUNCTION_TARGET || process.env.FIREBASE_CONFIG);
+const projectId = process.env.FIREBASE_PROJECT_ID
+  || process.env.GCLOUD_PROJECT
+  || (process.env.FIREBASE_CONFIG ? (JSON.parse(process.env.FIREBASE_CONFIG).projectId as string | undefined) : undefined);
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 // Private keys pasted into .env keep their newlines escaped as \n — restore them.
 const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
@@ -24,13 +30,17 @@ if (!projectId) {
   throw new Error('Missing FIREBASE_PROJECT_ID in environment');
 }
 
-if (!useEmulators && (!clientEmail || !privateKey)) {
+if (!useEmulators && !runningInFunctions && (!clientEmail || !privateKey)) {
   throw new Error(
     'Missing Firebase Admin credentials. Set FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in environment'
   );
 }
 
 function createApp(): App {
+  if (runningInFunctions && !useEmulators) {
+    // Application Default Credentials: the function's own service account.
+    return initializeApp();
+  }
   if (useEmulators) {
     console.log(`Firebase Admin running against emulators (project: ${projectId})`);
     return initializeApp({ projectId });

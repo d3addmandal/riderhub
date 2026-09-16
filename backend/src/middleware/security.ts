@@ -33,10 +33,12 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  validate: { trustProxy: false },
 });
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: envMax('AUTH_RATE_LIMIT_MAX', 20),
   message: { error: 'Too many auth attempts' },
+  validate: { trustProxy: false },
 });

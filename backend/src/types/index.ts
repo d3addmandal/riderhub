@@ -14,28 +14,6 @@ export interface AuthRequest extends Request<Record<string, string>> {
   user?: AuthUser;
 }
 
-export interface RiderLocation {
-  userId: string;
-  name: string;
-  color: string;
-  lat: number;
-  lng: number;
-  speed?: number;
-  heading?: number;
-  battery?: number;
-  timestamp: string;
-  status: 'online' | 'idle' | 'moving' | 'offline';
-}
-
-export interface RoomState {
-  groupId: string;
-  riders: Map<string, RiderLocation>;
-  destination?: {
-    name: string;
-    lat: number;
-    lng: number;
-  };
-}
 
 export interface Motorcycle {
   id: string;

@@ -2,7 +2,7 @@
   "name": "riderhub-backend",
   "version": "1.0.0",
   "description": "RiderHub API Server",
-  "main": "dist/index.js",
+  "main": "dist/function.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
@@ -14,9 +14,10 @@
     "express": "^4.21.1",
     "express-rate-limit": "^7.4.1",
     "firebase-admin": "^13.10.0",
+    "firebase-functions": "^7.4.0",
     "helmet": "^8.0.0",
     "node-telegram-bot-api": "^0.66.0",
-    "socket.io": "^4.7.5",
+    "riderhub": "file:..",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -26,5 +27,8 @@
     "@types/node-telegram-bot-api": "^0.64.7",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": "22"
   }
 }

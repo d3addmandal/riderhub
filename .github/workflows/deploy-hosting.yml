@@ -1,29 +1,28 @@
-# Deploys the PWA to Firebase Hosting without the Firebase CLI on anyone's machine.
+# Deploys the whole application to Firebase — site, API function and Firestore rules —
+# without the Firebase CLI on anyone's machine: GitHub's runner installs it for the
+# duration of the job.
 #
 # Runs on every push to `main`, and on demand from GitHub → Actions → "Deploy to
-# Firebase Hosting" → Run workflow. That button is the deploy: build, both release
-# guards, then upload. The action reads firebase.json from the repository root, so the
-# rewrites and headers ship exactly as tested locally.
+# Firebase" → Run workflow. That button is the deploy: build both halves, run the
+# release guards, upload, then verify the live site.
 #
-# One-time setup, all in a browser — see DEPLOY.md "Deploying from the browser":
-#   Secret    FIREBASE_SERVICE_ACCOUNT  — JSON key of a service account with the
-#                                         Firebase Hosting Admin role
-#   Variables VITE_API_URL, VITE_FIREBASE_*  — the build settings (public values)
-name: Deploy to Firebase Hosting
+# One-time setup, all in a browser — see DEPLOY.md:
+#   Secret    FIREBASE_SERVICE_ACCOUNT — JSON key of a service account that may deploy
+#   Variables VITE_FIREBASE_*          — the public web config the build bakes in
+name: Deploy to Firebase
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Two pushes in quick succession should not race each other to the live site.
+# Two pushes in quick succession must not race each other to the live site.
 concurrency:
-  group: firebase-hosting-live
+  group: firebase-live
   cancel-in-progress: false
 
 permissions:
   contents: read
-  checks: write
 
 jobs:
   deploy:
@@ -35,15 +34,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
 
-      - name: Install frontend dependencies
-        run: npm ci --prefix frontend
+      - name: Install dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix backend
 
       # Vite reads VITE_* from the process environment on top of frontend/.env.production.
-      # Repository variables win when set; the committed file is the fallback. Either way
-      # the build must not proceed with a placeholder API address or without the Firebase
-      # web config — that produces a site that installs beautifully and cannot sign in.
+      # Repository variables win when set; the committed file is the fallback. The build
+      # must not proceed without the Firebase web config — that produces a site that
+      # installs beautifully and cannot sign in. VITE_API_URL stays empty on Firebase:
+      # the API is served from the same origin through a Hosting rewrite.
       - name: Resolve build settings
         env:
           REPO_VARS: ${{ toJSON(vars) }}
@@ -58,17 +62,17 @@ jobs:
             if (m && m[2]) fromFile[m[1]] = m[2];
           }
           const merged = { ...fromFile, ...fromVars };
-          const required = ['VITE_API_URL', 'VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN',
+          const required = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN',
             'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_APP_ID'];
           const missing = required.filter(k => !merged[k]);
           if (missing.length) {
             console.error(`Missing build settings: ${missing.join(', ')}\n` +
-              'Add them as repository Variables (Settings → Secrets and variables → Actions → Variables) ' +
-              'or commit them in frontend/.env.production. They are public values, not secrets.');
+              'Add them as repository Variables (Settings → Secrets and variables → Actions → Variables). ' +
+              'They are public values, not secrets — Firebase Console → Project settings → Your apps.');
             process.exit(1);
           }
-          if (!/^https:\/\//.test(merged.VITE_API_URL) || /YOUR-DOMAIN/.test(merged.VITE_API_URL)) {
-            console.error(`VITE_API_URL is "${merged.VITE_API_URL}" — it must be the real https:// address of the API.`);
+          if (merged.VITE_API_URL && !/^https:\/\//.test(merged.VITE_API_URL)) {
+            console.error(`VITE_API_URL is "${merged.VITE_API_URL}". On Firebase leave it unset (same-origin /api); otherwise it must be https://.`);
             process.exit(1);
           }
           fs.appendFileSync(process.env.GITHUB_ENV, Object.entries(fromVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
@@ -76,23 +80,36 @@ jobs:
           console.log('From frontend/.env.production:', Object.keys(fromFile).filter(k => !fromVars[k]).join(', ') || '(none)');
           EOF
 
-      - name: Build
+      - name: Build the site
         run: npm run build --prefix frontend
+
+      - name: Build the API
+        run: npm run build --prefix backend
 
       # The same guards `npm run deploy:web` runs locally. A failure here stops the deploy.
       - name: Guard — no server secret in the bundle
         run: node tests/phase31.mjs .
       - name: Guard — the PWA is still installable
         run: node tests/phase36.mjs frontend/dist
+      - name: Guard — the API is wired as a function
+        run: node tests/phase39.mjs
 
-      - name: Deploy to the live channel
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: fly-with-pegasus
-          channelId: live
+      # The service-account key never touches the repository: it is written from the
+      # secret to a file that exists only for this job, and the CLI reads it through the
+      # standard GOOGLE_APPLICATION_CREDENTIALS variable.
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/firebase-sa.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$RUNNER_TEMP/firebase-sa.json" \
+            || { echo 'FIREBASE_SERVICE_ACCOUNT is not valid JSON — paste the whole downloaded key file.'; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
 
-      # The live site is the only place the headers can be checked (see DEPLOY.md).
+      # --force answers the CLI's yes/no prompts with their defaults (there is nobody
+      # to answer them here), e.g. adopting the image clean-up policy on the first
+      # functions deploy. It never deletes data.
+      - name: Deploy site, API and Firestore rules
+        run: npx --yes firebase-tools@15 deploy --only hosting,functions,firestore:rules --project fly-with-pegasus --non-interactive --force
+
+      # The live site is the final word on headers, rewrites and the API being reachable.
       - name: Verify the live site
         run: node tests/phase37.mjs https://fly-with-pegasus.web.app

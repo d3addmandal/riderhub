@@ -84,7 +84,7 @@ if (WINDOWS_EMULATOR) {
     skipped('rewrite rules', 'superstatic not found (is firebase-tools installed globally?)');
   } else {
     for (const p of DEEP) check(`${p} rewrites to the app`, firstRewrite(p)?.destination === '/index.html', 'no matching rewrite');
-    for (const p of ['/api', '/api/', '/api/rides', '/api/config/maps']) check(`${p} is NOT rewritten to the shell`, !firstRewrite(p), 'would serve index.html');
+    for (const p of ['/api/', '/api/rides', '/api/config/maps']) check(`${p} goes to the API function, not the shell`, firstRewrite(p)?.function?.functionId === 'api', JSON.stringify(firstRewrite(p)));
     // Regressions of the "looks like /api" kind: these are app routes and must keep working.
     for (const p of ['/a', '/apple', '/apix']) check(`${p} still rewrites (not mistaken for /api)`, firstRewrite(p)?.destination === '/index.html');
   }
@@ -96,8 +96,8 @@ if (WINDOWS_EMULATOR) {
   const api = await get('/api/rides');
   check('/api/* is NOT rewritten to the shell', !api.body.includes('<div id="root">'), `status ${api.status}, served index.html`);
 }
-// Whatever the platform, the regex must be RE2-legal: production Hosting compiles it with
-// RE2, which has no lookahead/lookbehind. A JS-only construct deploys fine and then 500s.
+// If a regex rewrite is ever added it must be RE2-legal: production Hosting compiles it
+// with RE2, which has no lookahead/lookbehind. A JS-only construct deploys and then 500s.
 for (const rw of cfg.rewrites.filter(r => r.regex)) {
   check(`rewrite regex is RE2-safe (${rw.regex.slice(0, 24)}…)`, !/\(\?[=!<]/.test(rw.regex), 'contains lookaround');
 }

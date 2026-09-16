@@ -9,7 +9,14 @@
     "cleanUrls": true,
     "rewrites": [
       {
-        "regex": "^/(?:[^a].*|a(?:[^p].*)?|ap(?:[^i].*)?|api[^/].*)?$",
+        "source": "/api/**",
+        "function": {
+          "functionId": "api",
+          "region": "asia-south1"
+        }
+      },
+      {
+        "source": "**",
         "destination": "/index.html"
       }
     ],
@@ -115,6 +122,24 @@
     },
     "ui": {
       "enabled": true
+    },
+    "functions": {
+      "port": 5001
     }
+  },
+  "functions": {
+    "source": "backend",
+    "codebase": "api",
+    "runtime": "nodejs22",
+    "predeploy": [
+      "npm --prefix backend run build"
+    ],
+    "ignore": [
+      "node_modules",
+      ".git",
+      "src",
+      "tsconfig.json",
+      "*.log"
+    ]
   }
 }

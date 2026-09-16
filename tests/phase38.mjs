@@ -21,29 +21,32 @@ check('two deploys cannot race each other', /concurrency:/.test(wf) && /cancel-i
 console.log('\n=== IT DEPLOYS THE SAME THING THE CLI WOULD ===');
 const fb = JSON.parse(readFileSync('firebase.json', 'utf8'));
 const rc = JSON.parse(readFileSync('.firebaserc', 'utf8'));
-check('it targets the project in .firebaserc', wf.includes(`projectId: ${rc.projects.default}`), rc.projects.default);
-check('it deploys to the live channel', /channelId:\s*live/.test(wf));
-check('it uses the official hosting action', /FirebaseExtended\/action-hosting-deploy@/.test(wf));
+check('it targets the project in .firebaserc', wf.includes(`--project ${rc.projects.default}`), rc.projects.default);
+check('it deploys site, API function and Firestore rules in one go', /deploy --only hosting,functions,firestore:rules/.test(wf));
+check('it deploys with the Firebase CLI, non-interactively', /firebase-tools@\d+ deploy/.test(wf) && /--non-interactive/.test(wf) && /--force/.test(wf));
 check('it builds the directory firebase.json publishes', wf.includes('npm run build --prefix frontend') && fb.hosting.public === 'frontend/dist');
-check('the service account comes from a secret, never the file system', /secrets\.FIREBASE_SERVICE_ACCOUNT/.test(wf) && !/serviceAccountKey|\.json/.test(wf.replace(/package-lock\.json|firebase\.json|\.env\.production|package\.json/g, '')));
+check('it builds the API before deploying', wf.indexOf('npm run build --prefix backend') < wf.indexOf('deploy --only'));
+check('it installs the backend dependencies too', /npm ci --prefix backend/.test(wf));
+check('the service account key comes from a secret into a job-only file', /secrets\.FIREBASE_SERVICE_ACCOUNT/.test(wf) && /GOOGLE_APPLICATION_CREDENTIALS=\$RUNNER_TEMP/.test(wf));
+check('a malformed secret fails with a readable message', /not valid JSON/.test(wf));
 
 console.log('\n=== THE RELEASE GUARDS STILL RUN ===');
 // deploy:web runs phase31 and phase36 before firebase deploy; the workflow must too, or
 // the browser path becomes the way secrets and broken installs slip out.
 const local = JSON.parse(readFileSync('package.json', 'utf8')).scripts['deploy:web'];
 for (const guard of local.match(/tests\/phase\d+\.mjs/g)) {
-  check(`${guard} runs before the upload`, wf.indexOf(guard) !== -1 && wf.indexOf(guard) < wf.indexOf('action-hosting-deploy@'));
+  check(`${guard} runs before the upload`, wf.indexOf(guard) !== -1 && wf.indexOf(guard) < wf.indexOf('deploy --only'));
 }
+check('tests/phase39.mjs (function wiring) runs before the upload', wf.indexOf('tests/phase39.mjs') !== -1 && wf.indexOf('tests/phase39.mjs') < wf.indexOf('deploy --only'));
 check('the live site is verified after the upload',
-  wf.indexOf('tests/phase37.mjs https://') > wf.indexOf('action-hosting-deploy@'));
+  wf.indexOf('tests/phase37.mjs https://') > wf.indexOf('deploy --only'));
 
 console.log('\n=== THE BUILD CANNOT SHIP WITH PLACEHOLDER SETTINGS ===');
-for (const k of ['VITE_API_URL', 'VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID',
+for (const k of ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID',
                  'VITE_FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_APP_ID']) {
   check(`${k} is required`, wf.includes(`'${k}'`));
 }
-check('the placeholder API address is rejected', /YOUR-DOMAIN/.test(wf));
-check('a non-https API address is rejected', wf.includes('^https:'));
+check('VITE_API_URL is optional (same-origin on Firebase) but must be https if set', !wf.includes("'VITE_API_URL'") && wf.includes('^https:'));
 check('settings can come from repository Variables (set in the GitHub UI)', /toJSON\(vars\)/.test(wf));
 
 console.log('\n=== NOTHING SECRET CAN REACH THE REPOSITORY ===');
