@@ -47,6 +47,9 @@ and push from GitHub Desktop; every push to `main` deploys.
    - **Secret Manager Admin** — lets the deploy grant the function access to its secrets
    - **Service Usage Admin** — lets the first deploy switch on the Cloud Functions,
      Cloud Build, Artifact Registry, Cloud Run and Eventarc APIs it needs
+   - **Artifact Registry Administrator** — lets the deploy set a clean-up policy on the
+     container images it builds. Without it every deploy leaves another image behind,
+     and the free 0.5 GB runs out after a while — a small bill for nothing
 3. Open the account → *Keys → Add key → Create new key → JSON*. A file downloads.
 4. GitHub → repository → *Settings → Secrets and variables → Actions → New repository
    secret*. Name `FIREBASE_SERVICE_ACCOUNT`; value = the **entire** contents of the file.

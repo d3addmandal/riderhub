@@ -128,6 +128,7 @@ const HEADER_RULES = [
   ['/manifest.webmanifest', 'content-type', /manifest\+json/, 'wrong type breaks install prompts'],
   ['/assets/index-abc123.js', 'cache-control', /max-age=31536000.*immutable/, 'hashed assets are safe to cache for a year'],
   ['/icons/icon-192.png', 'cache-control', /max-age=604800/, 'icons cached a week'],
+  ['/rides/abc', 'cache-control', /no-cache|no-store/, 'a deep link serves the shell too'],
   ['/rides/abc', 'x-frame-options', /^DENY$/i, 'clickjacking'],
   ['/rides/abc', 'x-content-type-options', /^nosniff$/i, 'MIME sniffing'],
   ['/rides/abc', 'permissions-policy', /geolocation=\(self\)/, 'geolocation only for the app itself'],
@@ -143,8 +144,11 @@ if (WINDOWS_EMULATOR) {
     }
     // The shell itself: cleanUrls serves "/" from index.html, and the CDN applies the
     // rules for the resolved file. Both spellings must be no-cache.
-    check('/index.html → cache-control no-cache (a cached shell pins riders to old code)',
-      /no-cache|no-store/.test(headersFor('/index.html')['cache-control'] ?? ''));
+    // Hosting matches on the request path, so the rule that matters is the one covering
+  // "/" and every deep link - not one naming the file they are rewritten to.
+  for (const p of ['/', '/index.html', '/rides', '/rides/abc/map'])
+      check(`${p} → cache-control no-cache (a cached shell pins riders to old code)`,
+        /no-cache|no-store/.test(headersFor(p)['cache-control'] ?? ''), headersFor(p)['cache-control'] ?? '(no rule matches)');
   }
 } else {
   const livePath = (p) => p.startsWith('/assets/') ? (root.body.match(/\/assets\/[^"']+\.js/)?.[0] ?? p) : p;
