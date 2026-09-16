@@ -34,7 +34,7 @@
 	}
 
 	handle {
-		root * {$RIDERHUB_WEB_ROOT:/srv/riderhub/current/frontend/dist}
+		root * {$RIDERHUB_WEB_ROOT:/srv/riderhub/app/frontend/dist}
 
 		# `route` runs these in the order written, rather than Caddy's usual directive
 		# sorting. That matters: the first header block is the safe default and the ones

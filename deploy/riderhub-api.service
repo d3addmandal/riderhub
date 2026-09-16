@@ -1,7 +1,7 @@
 # The Express API, run by systemd so it survives crashes and reboots.
 #
-#   sudo cp deploy/riderhub-api.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now riderhub-api
+# A template: run.sh substitutes __APP_DIR__ and installs it. Do not copy it into
+# /etc/systemd/system by hand — the placeholder would be taken literally.
 #
 # It listens on a non-standard port bound to 127.0.0.1, so the only way in is through
 # Caddy. Secrets come from /etc/riderhub/api.env, which is root-owned and 0600.
@@ -15,7 +15,7 @@ Wants=network-online.target
 Type=simple
 User=riderhub
 Group=riderhub
-WorkingDirectory=/srv/riderhub/current/backend
+WorkingDirectory=__APP_DIR__/backend
 ExecStart=/usr/bin/node dist/index.js
 EnvironmentFile=/etc/riderhub/api.env
 Restart=always

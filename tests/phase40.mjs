@@ -81,21 +81,51 @@ check('binding elsewhere is a deliberate choice, not the default', /process\.env
 check('the proxy hop count is configurable for Caddy', /TRUST_PROXY/.test(app));
 check('a dev machine trusts no proxy header', !/app\.set\('trust proxy', true\);\s*$/m.test(app.split('else if')[0].split('if (process.env.K_SERVICE)')[0]));
 
-console.log('\n=== THE MACHINE SETUP IS REPRODUCIBLE ===');
-for (const f of ['deploy/setup-oracle.sh', 'deploy/apply.sh', 'deploy/riderhub-api.service']) {
-  check(`${f} is in the repo`, existsSync(f));
-}
+console.log('\n=== ONE COMMAND PROVISIONS AND DEPLOYS ===');
+// The box is driven entirely by run.sh: the first run provisions it, every run after
+// syncs and redeploys. If it quietly stops doing one of these, the failure is remote.
+check('run.sh is in the repo', existsSync('run.sh'));
+const run = readFileSync('run.sh', 'utf8');
+check('it refuses to run without root rather than half-failing', /EUID -eq 0/.test(run));
+check('it stops at the first error instead of carrying on', /set -euo pipefail/.test(run));
+check('it pulls from GitHub on a normal run', /pull --ff-only/.test(run));
+check('--no-pull exists for rebuilding what is already there', /--no-pull/.test(run));
+check('it explains deploy keys when a private pull is refused', /Deploy keys/.test(run));
+check('it builds both halves', /backend"\s+run build/.test(run) && /frontend" run build/.test(run));
+check('it installs devDependencies, which the build itself needs', !/--omit=dev/.test(run));
+
+console.log('\n=== A DEPLOY CANNOT QUIETLY BREAK THE SITE ===');
+// Anchored to a line of its own: the same words appear in a comment further up, and
+// matching that would have made this check pass for the wrong reason.
+const restartAt = run.search(/^systemctl restart riderhub-api$/m);
+check('the release guards run before the service is restarted',
+  ['phase31', 'phase36', 'phase40'].every(t => run.includes(t)) &&
+  restartAt > 0 && run.indexOf('phase31') < restartAt);
+check('the Caddyfile is validated before it is reloaded',
+  /caddy validate/.test(run) && run.indexOf('caddy validate') < run.indexOf('systemctl reload caddy'));
+check('a bad Caddyfile leaves the running site alone', /the site is still up/.test(run));
+check('success is not claimed until the API answers',
+  run.includes('/health') && /journalctl -u riderhub-api/.test(run));
+check('it opens both 80 and 443 in the instance firewall', /for port in 80 443/.test(run));
+check('it says the VCN security list is a separate step', /VCN/.test(run));
+check('it adds swap on small shapes, where a build is otherwise OOM-killed',
+  /swapfile/.test(run) && /RAM_MB < 2048/.test(run));
+check('it reminds you to authorise the new domain for sign-in and Maps',
+  /Authorized domains/.test(run) && /Website restrictions/.test(run));
+
+console.log('\n=== THE SERVICE SURVIVES A REBOOT ===');
 const unit = readFileSync('deploy/riderhub-api.service', 'utf8');
 check('the API runs as its own unprivileged user', /User=riderhub/.test(unit));
-check('it restarts after a crash or reboot', /Restart=always/.test(unit) && /WantedBy=multi-user\.target/.test(unit));
+check('it restarts after a crash', /Restart=always/.test(unit));
+check('it comes back after a reboot', /WantedBy=multi-user\.target/.test(unit));
 check('secrets come from a file outside the repo', /EnvironmentFile=\/etc\/riderhub\/api\.env/.test(unit));
-const apply = readFileSync('deploy/apply.sh', 'utf8');
-check('a deploy validates the Caddyfile before reloading it', /caddy validate/.test(apply));
-check('a deploy proves the API answers before declaring success', /\/health/.test(apply) && /exit 1/.test(apply));
-const setup = readFileSync('deploy/setup-oracle.sh', 'utf8');
-check('setup opens both 80 and 443 in the instance firewall', /--dport "\$port"/.test(setup) && /for port in 80 443/.test(setup));
-check('setup writes no credential into the file it creates',
-  !/(GOOGLE_MAPS_API_KEY|TELEGRAM_BOT_TOKEN|FIREBASE_PRIVATE_KEY)=\S/.test(setup.replace(/FIREBASE_PRIVATE_KEY=""/g, '')));
+check('the home directory is off limits to the service', /ProtectHome=true/.test(unit));
+// The unit is a template. Copied into place by hand the placeholder stays literal and
+// systemd fails on a path that does not exist, so the substitution must be in run.sh.
+check('the unit is a template that run.sh fills in',
+  /__APP_DIR__/.test(unit) && run.includes('__APP_DIR__'));
+check('the app lives outside /home, which ProtectHome would otherwise block',
+  /APP_HOME=\/srv\/riderhub/.test(run) && /APP_DIR="?\$APP_HOME\/app/.test(run));
 
 console.log(`\n${'='.repeat(52)}\nPASSED: ${pass}   FAILED: ${fail}`);
 if (fails.length) { console.log('\nFailures:'); fails.forEach(f => console.log('  - ' + f)); }
