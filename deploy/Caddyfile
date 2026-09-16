@@ -1,0 +1,81 @@
+# RiderHub on Oracle Cloud — the whole application behind one hostname.
+#
+# Caddy is the only thing listening on a public port. It terminates TLS, serves the PWA
+# straight off disk, and hands /api to the Express process on a non-standard port bound
+# to localhost, which nothing outside the machine can reach. The rider sees one origin,
+# so there is no CORS, no mixed content, and no second certificate.
+#
+# Caddy obtains and renews the Let's Encrypt certificate by itself. That needs ports 80
+# and 443 open in BOTH Oracle firewalls (VCN security list and the instance's iptables)
+# — see deploy/setup-oracle.sh, which does the iptables half.
+#
+# Values come from /etc/riderhub/caddy.env (see setup-oracle.sh).
+
+{
+	# Where Let's Encrypt sends expiry warnings if renewal ever stops working.
+	email {$RIDERHUB_ACME_EMAIL}
+	# Caddy's admin socket is localhost-only by default; say so explicitly.
+	admin localhost:2019
+}
+
+{$RIDERHUB_DOMAIN} {
+	encode zstd gzip
+
+	# The API. `handle` blocks are mutually exclusive and tried in order, so this wins
+	# over the SPA fallback below — without it, a request to /api/rides would be
+	# answered with index.html and the app would parse HTML as JSON.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{$RIDERHUB_API_PORT:8731}
+	}
+
+	# Liveness, for the deploy script and any uptime monitor. Same process, no auth.
+	handle /health {
+		reverse_proxy 127.0.0.1:{$RIDERHUB_API_PORT:8731}
+	}
+
+	handle {
+		root * {$RIDERHUB_WEB_ROOT:/srv/riderhub/current/frontend/dist}
+
+		# `route` runs these in the order written, rather than Caddy's usual directive
+		# sorting. That matters: the first header block is the safe default and the ones
+		# after it deliberately override the same field for narrower paths.
+		route {
+			# Applies to everything, including the app shell at / and every deep link.
+			# no-cache on the shell is the important one: the HTML names hashed bundles,
+			# so a cached shell keeps riders on the previous release after a deploy.
+			header {
+				X-Content-Type-Options nosniff
+				X-Frame-Options DENY
+				Referrer-Policy strict-origin-when-cross-origin
+				Permissions-Policy "geolocation=(self), camera=(), microphone=()"
+				Cache-Control "no-cache, must-revalidate"
+				-Server
+			}
+
+			# Icons and the splash badge: named, not hashed, so a week is the sensible
+			# compromise between staleness and refetching them constantly.
+			@images path *.png *.ico *.svg *.webp
+			header @images Cache-Control "public, max-age=604800"
+
+			# Hashed filenames — the content can never change under a given name, so a
+			# year is safe. Listed after @images so hashed images get the year too.
+			header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+			# A cached service worker is a PWA that can never update itself.
+			header /sw.js {
+				Cache-Control "no-cache, no-store, must-revalidate"
+				Service-Worker-Allowed "/"
+			}
+			header /registerSW.js Cache-Control "no-cache, no-store, must-revalidate"
+			header /manifest.webmanifest {
+				Cache-Control "no-cache"
+				Content-Type "application/manifest+json"
+			}
+
+			# Single-page app: every unknown path is a client-side route, so serve the
+			# shell and let the router decide. Real files still win.
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}

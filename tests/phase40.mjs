@@ -1,0 +1,102 @@
+// Caddy on Oracle must deliver exactly what Firebase Hosting delivered.
+//
+// The same app is served two ways now, and the guarantees live in two unrelated files —
+// firebase.json and deploy/Caddyfile. Nothing stops one from being fixed and the other
+// forgotten, and the difference is invisible until a rider is stuck on a cached shell or
+// a deep link 404s. So firebase.json stays the single source of truth for what the
+// headers should be, and this reads the Caddyfile back against it.
+//
+// Static checks: Caddy cannot run here. The live site is the real proof —
+// `node tests/phase37.mjs https://<domain>`, which the deploy workflow runs for us.
+import { readFileSync, existsSync } from 'node:fs';
+
+const CADDY = 'deploy/Caddyfile';
+let pass = 0, fail = 0; const fails = [];
+const check = (n, c, d) => c ? (pass++, console.log(`  PASS  ${n}`))
+  : (fail++, fails.push(n), console.log(`  FAIL  ${n}${d ? ` — ${d}` : ''}`));
+
+const caddy = existsSync(CADDY) ? readFileSync(CADDY, 'utf8') : '';
+const hosting = JSON.parse(readFileSync('firebase.json', 'utf8')).hosting;
+const ruleFor = (src) => Object.fromEntries((hosting.headers.find(h => h.source === src)?.headers ?? [])
+  .map(h => [h.key.toLowerCase(), h.value]));
+
+console.log('\n=== THE CADDYFILE EXISTS AND IS COHERENT ===');
+check('deploy/Caddyfile is present', caddy.length > 0);
+check('it serves one hostname from configuration, not a hardcoded domain', /\{\$RIDERHUB_DOMAIN\}/.test(caddy));
+check('a contact address is set for certificate expiry warnings', /email \{\$RIDERHUB_ACME_EMAIL\}/.test(caddy));
+// Curly-brace balance catches the usual hand-editing mistake, which Caddy would reject
+// on reload — taking the whole site down rather than just the new bit.
+check('braces balance', (caddy.match(/\{/g) ?? []).length === (caddy.match(/\}/g) ?? []).length,
+  `${(caddy.match(/\{/g) ?? []).length} open, ${(caddy.match(/\}/g) ?? []).length} close`);
+
+console.log('\n=== THE API IS REACHED, AND NOT SWALLOWED BY THE APP ===');
+const apiAt = caddy.indexOf('handle /api/*');
+const spaAt = caddy.search(/^\thandle \{$/m);
+check('/api/* is proxied to the API process', apiAt !== -1 && /handle \/api\/\*\s*\{\s*reverse_proxy 127\.0\.0\.1:/.test(caddy));
+check('it is matched before the catch-all, or every API call returns index.html',
+  apiAt !== -1 && spaAt !== -1 && apiAt < spaAt);
+check('the API port is configurable and non-standard', /\{\$RIDERHUB_API_PORT:(\d+)\}/.test(caddy) &&
+  Number(caddy.match(/\{\$RIDERHUB_API_PORT:(\d+)\}/)[1]) > 1024);
+check('the proxy target is localhost, so nothing else can reach the API',
+  !/reverse_proxy (?!127\.0\.0\.1)/.test(caddy));
+check('/health is reachable for the deploy check', /handle \/health/.test(caddy));
+check('deep links fall back to the app shell', /try_files \{path\} \/index\.html/.test(caddy));
+check('static files are actually served', /file_server/.test(caddy));
+
+console.log('\n=== HEADERS MATCH WHAT FIREBASE HOSTING SENDS ===');
+// Ordering is load-bearing in both files: the catch-all is the safe default and the
+// narrower rules override it, so the global block must come first inside `route`.
+const globalAt = caddy.search(/\n\t{3}header \{/);
+check('the global header block comes before the path-specific ones',
+  globalAt !== -1 && globalAt < caddy.indexOf('header /assets/*') && globalAt < caddy.indexOf('header @images'));
+
+const security = ruleFor('**');
+for (const [key, value] of Object.entries(security)) {
+  // Caddy quotes values containing spaces; compare on the value itself.
+  const re = new RegExp(`${key.replace(/[-]/g, '-')}\\s+"?${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?`, 'i');
+  check(`${key}: ${value}`, re.test(caddy));
+}
+check('the app shell is not cached (the one that pins riders to old code)',
+  /Cache-Control "no-cache, must-revalidate"/.test(caddy) && security['cache-control'] === 'no-cache, must-revalidate');
+
+const assets = ruleFor('/assets/**')['cache-control'];
+check(`hashed assets: ${assets}`, caddy.includes(`header /assets/* Cache-Control "${assets}"`));
+const images = ruleFor('**/*.@(png|ico|svg|webp)')['cache-control'];
+check(`images: ${images}`, caddy.includes(`header @images Cache-Control "${images}"`));
+check('the image matcher covers the same extensions as the Hosting glob',
+  /@images path \*\.png \*\.ico \*\.svg \*\.webp/.test(caddy));
+
+const sw = ruleFor('/sw.js');
+check(`sw.js: ${sw['cache-control']}`, caddy.includes(`Cache-Control "${sw['cache-control']}"`));
+check('sw.js may control the whole origin', new RegExp(`Service-Worker-Allowed "${sw['service-worker-allowed']}"`).test(caddy));
+check('registerSW.js is not cached either', /header \/registerSW\.js Cache-Control "no-cache/.test(caddy));
+const man = ruleFor('/manifest.webmanifest');
+check(`manifest content type: ${man['content-type']}`, caddy.includes(`Content-Type "${man['content-type']}"`));
+
+console.log('\n=== THE API PROCESS IS NOT EXPOSED DIRECTLY ===');
+const index = readFileSync('backend/src/index.ts', 'utf8');
+const app = readFileSync('backend/src/app.ts', 'utf8');
+check('it binds localhost unless told otherwise', /BIND_HOST \|\| '127\.0\.0\.1'/.test(index));
+check('binding elsewhere is a deliberate choice, not the default', /process\.env\.BIND_HOST/.test(index));
+check('the proxy hop count is configurable for Caddy', /TRUST_PROXY/.test(app));
+check('a dev machine trusts no proxy header', !/app\.set\('trust proxy', true\);\s*$/m.test(app.split('else if')[0].split('if (process.env.K_SERVICE)')[0]));
+
+console.log('\n=== THE MACHINE SETUP IS REPRODUCIBLE ===');
+for (const f of ['deploy/setup-oracle.sh', 'deploy/apply.sh', 'deploy/riderhub-api.service']) {
+  check(`${f} is in the repo`, existsSync(f));
+}
+const unit = readFileSync('deploy/riderhub-api.service', 'utf8');
+check('the API runs as its own unprivileged user', /User=riderhub/.test(unit));
+check('it restarts after a crash or reboot', /Restart=always/.test(unit) && /WantedBy=multi-user\.target/.test(unit));
+check('secrets come from a file outside the repo', /EnvironmentFile=\/etc\/riderhub\/api\.env/.test(unit));
+const apply = readFileSync('deploy/apply.sh', 'utf8');
+check('a deploy validates the Caddyfile before reloading it', /caddy validate/.test(apply));
+check('a deploy proves the API answers before declaring success', /\/health/.test(apply) && /exit 1/.test(apply));
+const setup = readFileSync('deploy/setup-oracle.sh', 'utf8');
+check('setup opens both 80 and 443 in the instance firewall', /--dport "\$port"/.test(setup) && /for port in 80 443/.test(setup));
+check('setup writes no credential into the file it creates',
+  !/(GOOGLE_MAPS_API_KEY|TELEGRAM_BOT_TOKEN|FIREBASE_PRIVATE_KEY)=\S/.test(setup.replace(/FIREBASE_PRIVATE_KEY=""/g, '')));
+
+console.log(`\n${'='.repeat(52)}\nPASSED: ${pass}   FAILED: ${fail}`);
+if (fails.length) { console.log('\nFailures:'); fails.forEach(f => console.log('  - ' + f)); }
+process.exit(fail === 0 ? 0 : 1);

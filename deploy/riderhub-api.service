@@ -1,0 +1,43 @@
+# The Express API, run by systemd so it survives crashes and reboots.
+#
+#   sudo cp deploy/riderhub-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now riderhub-api
+#
+# It listens on a non-standard port bound to 127.0.0.1, so the only way in is through
+# Caddy. Secrets come from /etc/riderhub/api.env, which is root-owned and 0600.
+[Unit]
+Description=RiderHub API
+Documentation=https://github.com/d3addmandal/riderhub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=riderhub
+Group=riderhub
+WorkingDirectory=/srv/riderhub/current/backend
+ExecStart=/usr/bin/node dist/index.js
+EnvironmentFile=/etc/riderhub/api.env
+Restart=always
+RestartSec=3
+# Don't let a crash loop hammer the box; give up after five failures in a minute and
+# leave the unit failed, which is visible in `systemctl status` rather than silent.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# The process needs nothing but its own directory and the network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/srv/riderhub
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=riderhub-api
+
+[Install]
+WantedBy=multi-user.target

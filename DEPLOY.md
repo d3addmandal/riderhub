@@ -1,5 +1,11 @@
 # Deploying RiderHub — everything on Firebase
 
+> **There are two deployment targets in this repo.** This file covers Firebase
+> (Hosting + Cloud Functions), which needs the Blaze plan for the API.
+> [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) covers the Oracle Cloud Always Free instance,
+> where Caddy serves the site and proxies to the API on an internal port — no Blaze,
+> no Cloud Functions. Both are kept working so you can switch without downtime.
+
 | Part | Firebase product | What it costs at club scale |
 |---|---|---|
 | The site (PWA) | Hosting | ₹0 — 10 GB stored, 360 MB/day served free |

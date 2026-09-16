@@ -1,0 +1,134 @@
+# Deploys the whole application — PWA and API — to the Oracle Cloud instance.
+#
+# GitHub → Actions → "Deploy to Oracle" → Run workflow. Nothing to install locally.
+#
+# Both halves are built here rather than on the instance: the Always Free machines are
+# small, and a Vite build on a 1 GB box is slow at best and killed by the OOM reaper at
+# worst. Only compiled output and the manifests are uploaded; the box runs `npm ci
+# --omit=dev` so native modules match its own architecture.
+#
+# Setup, once (see DEPLOY-ORACLE.md):
+#   Secrets    ORACLE_SSH_KEY   private key whose public half is in ~/.ssh/authorized_keys
+#              ORACLE_HOST      the instance's public IP or hostname
+#   Variables  ORACLE_USER      login name (ubuntu on Oracle's Ubuntu images)
+#              ORACLE_SSH_PORT  if sshd is not on 22
+#              RIDERHUB_DOMAIN  the site's hostname, for the post-deploy check
+name: Deploy to Oracle
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: oracle-live
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SSH_PORT: ${{ vars.ORACLE_SSH_PORT || '22' }}
+      SSH_USER: ${{ vars.ORACLE_USER || 'ubuntu' }}
+      REMOTE: /srv/riderhub/current
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix backend
+
+      # The site and the API share one origin behind Caddy, so the API base stays empty
+      # and requests go to /api on whatever host the rider opened.
+      - name: Resolve build settings
+        env:
+          REPO_VARS: ${{ toJSON(vars) }}
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const fromVars = Object.fromEntries(Object.entries(JSON.parse(process.env.REPO_VARS || '{}'))
+            .filter(([k, v]) => k.startsWith('VITE_') && v));
+          const required = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN',
+            'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_APP_ID'];
+          const missing = required.filter(k => !fromVars[k]);
+          if (missing.length) {
+            console.error(`Missing build settings: ${missing.join(', ')}\n` +
+              'Add them as repository Variables — Firebase Console → Project settings → Your apps.');
+            process.exit(1);
+          }
+          if (fromVars.VITE_API_URL) {
+            console.error(`VITE_API_URL is set to "${fromVars.VITE_API_URL}". On this setup Caddy serves ` +
+              'the API on the same origin, so it must be empty. Delete the repository variable.');
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, Object.entries(fromVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
+          EOF
+
+      - name: Build the site
+        run: npm run build --prefix frontend
+      - name: Build the API
+        run: npm run build --prefix backend
+
+      - name: Guard — no server secret in the bundle
+        run: node tests/phase31.mjs .
+      - name: Guard — the PWA is still installable
+        run: node tests/phase36.mjs frontend/dist
+      - name: Guard — Caddy serves what Hosting served
+        run: node tests/phase40.mjs
+
+      - name: Open an SSH connection
+        env:
+          KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          [ -n "$KEY" ]  || { echo 'Secret ORACLE_SSH_KEY is not set.'; exit 1; }
+          [ -n "$HOST" ] || { echo 'Secret ORACLE_HOST is not set.'; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "$SSH_PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_USER@$HOST" \
+            'echo "connected as $(whoami) to $(hostname)"; sudo -n true || { echo "This user needs passwordless sudo."; exit 1; }'
+
+      # --delete so a file removed from the repo stops being served; it is scoped to the
+      # two directories we own, never the whole tree.
+      - name: Upload the build
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -p $SSH_PORT"
+          rsync -az --delete -e "$SSH" --rsync-path="sudo rsync" \
+            frontend/dist/ "$SSH_USER@$HOST:$REMOTE/frontend/dist/"
+          rsync -az --delete -e "$SSH" --rsync-path="sudo rsync" \
+            backend/dist/ "$SSH_USER@$HOST:$REMOTE/backend/dist/"
+          rsync -az -e "$SSH" --rsync-path="sudo rsync" \
+            backend/package.json backend/package-lock.json "$SSH_USER@$HOST:$REMOTE/backend/"
+          rsync -az -e "$SSH" --rsync-path="sudo rsync" \
+            deploy/ "$SSH_USER@$HOST:$REMOTE/deploy/"
+
+      - name: Bring it into service
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_USER@$HOST" \
+            "bash $REMOTE/deploy/apply.sh"
+
+      # The live site is the only place the certificate, the rewrites and the cache
+      # headers can actually be observed.
+      - name: Verify the live site
+        if: vars.RIDERHUB_DOMAIN != ''
+        run: node tests/phase37.mjs "https://${{ vars.RIDERHUB_DOMAIN }}"
+
+      - name: Forget the key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
