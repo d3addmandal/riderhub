@@ -37,6 +37,8 @@ const local = JSON.parse(readFileSync('package.json', 'utf8')).scripts['deploy:w
 for (const guard of local.match(/tests\/phase\d+\.mjs/g)) {
   check(`${guard} runs before the upload`, wf.indexOf(guard) !== -1 && wf.indexOf(guard) < wf.indexOf('deploy --only'));
 }
+check('the credentials are checked before the upload, not discovered during it',
+  wf.indexOf('scripts/preflight-deploy.mjs') !== -1 && wf.indexOf('scripts/preflight-deploy.mjs') < wf.indexOf('deploy --only'));
 check('tests/phase39.mjs (function wiring) runs before the upload', wf.indexOf('tests/phase39.mjs') !== -1 && wf.indexOf('tests/phase39.mjs') < wf.indexOf('deploy --only'));
 check('the live site is verified after the upload',
   wf.indexOf('tests/phase37.mjs https://') > wf.indexOf('deploy --only'));

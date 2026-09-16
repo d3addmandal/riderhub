@@ -104,6 +104,11 @@ jobs:
             || { echo 'FIREBASE_SERVICE_ACCOUNT is not valid JSON — paste the whole downloaded key file.'; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
 
+      # The CLI's own "cannot get project" error covers four unrelated causes and names
+      # none of them. This says which one it is, before ten minutes of build time.
+      - name: Check the credentials can reach the project
+        run: node scripts/preflight-deploy.mjs fly-with-pegasus
+
       # --force answers the CLI's yes/no prompts with their defaults (there is nobody
       # to answer them here), e.g. adopting the image clean-up policy on the first
       # functions deploy. It never deletes data.

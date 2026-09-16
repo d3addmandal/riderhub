@@ -134,6 +134,35 @@ once. The GitHub path avoids both.
 
 ---
 
+## When a deploy fails
+
+The job checks the credentials before uploading anything and prints a specific
+instruction. The one worth knowing in advance:
+
+**"Failed to get Firebase project fly-with-pegasus"** — the project is fine; the
+service account cannot see it. Creating a service account and *granting it access* are
+two separate steps in the Google Cloud console, and the second one is easy to miss.
+
+Open **IAM & Admin → IAM** for the project, and look for
+`github-deploy@fly-with-pegasus.iam.gserviceaccount.com` in the list.
+
+- **Not there** → *Grant access*, paste that address as the principal, add the four
+  roles from step 3, save, wait a minute, re-run.
+- **There, but with fewer roles** → edit it and add the missing ones.
+- **The address is `…@some-other-project.iam.gserviceaccount.com`** → the account was
+  created in the wrong project (the console opens on whichever project you used last).
+  Create it under `fly-with-pegasus` and replace the `FIREBASE_SERVICE_ACCOUNT` secret
+  with the new key.
+
+The preflight prints which of these it is, along with the account it is actually using.
+
+Other failures it names directly: a key that was deleted, an API that is switched off,
+and the project still being on Spark when Cloud Functions need Blaze.
+
+The Actions log also shows a yellow warning that `actions/checkout@v4` and
+`actions/setup-node@v4` target Node 20. That is a GitHub deprecation notice, not a
+problem — the runner runs them on Node 24 and the deploy is unaffected.
+
 ## Branding: icon and splash
 
 `icon.png` (the pegasus, transparent) and `logo.png` (the round badge) in the project
