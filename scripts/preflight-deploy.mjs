@@ -134,8 +134,10 @@ if (billing && billing.billingEnabled === false) {
 }
 if (billing?.billingEnabled) console.log('✔ Blaze plan is active (Cloud Functions can be deployed).');
 
-// The first functions deploy turns these on itself, given Service Usage Admin. Listing
-// them here means a missing role shows up now rather than ten minutes into a build.
+// The CLI switches on Cloud Functions, Cloud Build and Artifact Registry when it needs
+// them — but not Secret Manager, which it reads *while* resolving the function's
+// secrets, so a disabled one aborts the deploy several minutes in. Turning them all on
+// here instead is exactly what the Service Usage Admin role was granted for.
 const NEEDED = {
   'cloudfunctions.googleapis.com': 'Cloud Functions',
   'cloudbuild.googleapis.com': 'Cloud Build (packages the function)',
@@ -145,18 +147,86 @@ const NEEDED = {
   'secretmanager.googleapis.com': 'Secret Manager (the API keys)',
   'firebasehosting.googleapis.com': 'Firebase Hosting',
 };
-const states = await Promise.all(Object.keys(NEEDED).map(async (s) => {
-  const r = await get(`https://serviceusage.googleapis.com/v1/projects/${PROJECT}/services/${s}`);
-  return [s, r.ok ? (await r.json()).state : null];
-}));
-const off = states.filter(([, state]) => state === 'DISABLED').map(([s]) => s);
-if (off.length) {
-  console.log(`\n  Not yet enabled: ${off.map(s => `${s} (${NEEDED[s]})`).join(', ')}`);
-  console.log('  The deploy will switch these on itself — that is what the Service Usage Admin role is for.');
-  console.log('  If it fails saying it cannot, enable them by hand from the API library page.');
-} else if (states.every(([, s]) => s === null)) {
-  console.log('  (Could not read API states — not required, continuing.)');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const stateOf = async (svc) => {
+  const r = await get(`https://serviceusage.googleapis.com/v1/projects/${PROJECT}/services/${svc}`);
+  return r.ok ? (await r.json()).state : null;
+};
+
+let states = Object.fromEntries(await Promise.all(Object.keys(NEEDED).map(async s => [s, await stateOf(s)])));
+let off = Object.keys(NEEDED).filter(s => states[s] === 'DISABLED');
+
+if (Object.values(states).every(v => v === null)) {
+  console.log('  (Cannot read API states — continuing; the deploy will report anything missing.)');
+} else if (!off.length) {
+  console.log('✔ Every API the deploy needs is already enabled.');
 } else {
-  console.log('✔ Every API the deploy needs is enabled.');
+  console.log(`
+Switching on ${off.length} API(s) this deploy needs:`);
+  for (const s of off) console.log(`    ${s} — ${NEEDED[s]}`);
+
+  const refused = [];
+  await Promise.all(off.map(async (svc) => {
+    const r = await fetch(`https://serviceusage.googleapis.com/v1/projects/${PROJECT}/services/${svc}:enable`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if (!r.ok) refused.push([svc, (await r.json().catch(() => ({})))?.error?.message ?? `HTTP ${r.status}`]);
+  }));
+  if (refused.length) {
+    fail('This account is not allowed to switch those APIs on.',
+      ...refused.map(([svc, why]) => `${svc}: ${why}`),
+      '',
+      `Give ${key.client_email} the "Service Usage Admin" role:`,
+      `  ${IAM}`,
+      'Or enable each one by hand:',
+      ...refused.map(([svc]) => `  https://console.cloud.google.com/apis/library/${svc}?project=${PROJECT}`));
+  }
+
+  // Enabling is asynchronous. Deploying against an API that is still coming up fails
+  // with the same "has not been used in project" error, so wait for them to report in.
+  const deadline = Date.now() + 150000;
+  while (off.length && Date.now() < deadline) {
+    await sleep(5000);
+    const still = [];
+    for (const svc of off) if (await stateOf(svc) !== 'ENABLED') still.push(svc);
+    off = still;
+  }
+  if (off.length) {
+    fail('Some APIs were still not active after two and a half minutes.',
+      ...off.map(s => `  ${s}`),
+      'This is usually just slow propagation — re-running the workflow normally clears it.');
+  }
+  console.log('✔ All enabled.');
+  // Freshly enabled APIs can still refuse the next call or two.
+  await sleep(10000);
 }
+
+/* ---------- the secrets the function binds must already exist ---------- */
+// `defineSecret('X')` makes the deploy look X up in Secret Manager. A missing one stops
+// the deploy after the container has been built — and the message names the HTTP call,
+// not the thing to do about it. Read the names out of the source so this cannot drift.
+const fnSource = readFileSync('backend/src/function.ts', 'utf8');
+const wanted = [...fnSource.matchAll(/defineSecret\(['"]([A-Z0-9_]+)['"]\)/g)].map(m => m[1]);
+const WHAT = {
+  GOOGLE_MAPS_API_KEY: 'server key — Routes, Places and Geocoding. Never sent to a browser.',
+  GOOGLE_MAPS_BROWSER_KEY: 'a separate key for the Maps JavaScript API, restricted by HTTP referrer to the two site domains.',
+  TELEGRAM_BOT_TOKEN: 'the club bot token from @BotFather (SOS alerts).',
+};
+const present = [], absent = [];
+for (const name of wanted) {
+  const r = await get(`https://secretmanager.googleapis.com/v1/projects/${PROJECT}/secrets/${name}`);
+  (r.ok ? present : absent).push(name);
+}
+if (absent.length) {
+  fail(`${absent.length} of the ${wanted.length} secrets the API needs ${absent.length === 1 ? 'does' : 'do'} not exist yet.`,
+    `Create ${absent.length === 1 ? 'it' : 'them'} here — the name must match exactly, the value is the raw key:`,
+    `  https://console.cloud.google.com/security/secret-manager?project=${PROJECT}`,
+    '',
+    ...absent.map(n => `  ${n}
+      ${WHAT[n] ?? 'required by the API'}`),
+    '',
+    'Use "Create secret", leave every other option at its default, then re-run the workflow.',
+    present.length ? `(Already there: ${present.join(', ')}.)` : '');
+}
+console.log(`✔ All ${wanted.length} secrets exist: ${wanted.join(', ')}.`);
 console.log('');

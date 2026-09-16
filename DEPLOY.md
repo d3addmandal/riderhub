@@ -52,10 +52,14 @@ and push from GitHub Desktop; every push to `main` deploys.
    secret*. Name `FIREBASE_SERVICE_ACCOUNT`; value = the **entire** contents of the file.
    Save, then **delete the downloaded file** — it is a credential.
 
-### 4. The API's secrets
+### 4. The API's secrets — required before the first deploy
 
-Google Cloud Console → *Security → Secret Manager* (enable the API if asked) → *Create
-secret*, three times. The **name must match exactly**; the value is the raw key/token:
+The function declares these three by name, so the deploy looks each one up and stops if
+it is missing. Create all three before running the workflow.
+
+Google Cloud Console → *Security → Secret Manager* → *Create secret*, three times
+(if the page offers to enable the API, accept). The **name must match exactly**, the
+value is the raw key or token, and every other option stays at its default:
 
 | Secret name | Value |
 |---|---|
@@ -156,8 +160,18 @@ Open **IAM & Admin → IAM** for the project, and look for
 
 The preflight prints which of these it is, along with the account it is actually using.
 
-Other failures it names directly: a key that was deleted, an API that is switched off,
-and the project still being on Spark when Cloud Functions need Blaze.
+**"Secret Manager API has not been used in project… or it is disabled"** — shouldn't
+happen any more: the preflight now switches on every API the deploy needs (that is what
+the *Service Usage Admin* role is for) and waits for them to come up. The Firebase CLI
+enables Cloud Functions, Cloud Build and Artifact Registry itself but not Secret
+Manager, which it reads while resolving the function's secrets — several minutes in.
+
+**"N of the 3 secrets the API needs do not exist yet"** — step 4 was skipped, or a name
+is misspelt. The names must match `backend/src/function.ts` exactly. The message lists
+the missing ones and links to the page.
+
+Other failures it names directly: a key that was deleted, and the project still being on
+Spark when Cloud Functions need Blaze.
 
 The Actions log also shows a yellow warning that `actions/checkout@v4` and
 `actions/setup-node@v4` target Node 20. That is a GitHub deprecation notice, not a
