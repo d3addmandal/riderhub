@@ -44,27 +44,35 @@ check('deep links fall back to the app shell', /try_files \{path\} \/index\.html
 check('static files are actually served', /file_server/.test(caddy));
 
 console.log('\n=== HEADERS MATCH WHAT FIREBASE HOSTING SENDS ===');
-// Ordering is load-bearing in both files: the catch-all is the safe default and the
-// narrower rules override it, so the global block must come first inside `route`.
-const globalAt = caddy.search(/\n\t{3}header \{/);
-check('the global header block comes before the path-specific ones',
-  globalAt !== -1 && globalAt < caddy.indexOf('header /assets/*') && globalAt < caddy.indexOf('header @images'));
+// The two hosts resolve overlapping header rules in opposite directions: Firebase applies
+// every match in order and the last wins, while Caddy's header directives wrap each other
+// so the first one written is outermost and applies last. Encoding that in a comment and
+// hoping is how every hashed asset came back no-cache. The Caddyfile makes its caching
+// matchers mutually exclusive instead; these check they stayed that way.
+check('exactly one caching rule can match any request',
+  caddy.includes('@shell not path /assets/* *.png *.ico *.svg *.webp /sw.js /registerSW.js /manifest.webmanifest'));
+check('the image rule does not also claim hashed assets',
+  /@images \{[\s\S]*?not path \/assets\/\*[\s\S]*?\}/.test(caddy));
+check('the unconditional header block sets no Cache-Control to shadow them',
+  !/header \{[^}]*Cache-Control[^}]*\}/.test(caddy.slice(caddy.indexOf('route {'))));
 
 const security = ruleFor('**');
+delete security['cache-control'];   // carried by @shell in Caddy; checked on its own below
 for (const [key, value] of Object.entries(security)) {
   // Caddy quotes values containing spaces; compare on the value itself.
   const re = new RegExp(`${key.replace(/[-]/g, '-')}\\s+"?${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?`, 'i');
   check(`${key}: ${value}`, re.test(caddy));
 }
 check('the app shell is not cached (the one that pins riders to old code)',
-  /Cache-Control "no-cache, must-revalidate"/.test(caddy) && security['cache-control'] === 'no-cache, must-revalidate');
+  caddy.includes('header @shell Cache-Control "no-cache, must-revalidate"') &&
+  ruleFor('**')['cache-control'] === 'no-cache, must-revalidate');
 
 const assets = ruleFor('/assets/**')['cache-control'];
 check(`hashed assets: ${assets}`, caddy.includes(`header /assets/* Cache-Control "${assets}"`));
 const images = ruleFor('**/*.@(png|ico|svg|webp)')['cache-control'];
 check(`images: ${images}`, caddy.includes(`header @images Cache-Control "${images}"`));
 check('the image matcher covers the same extensions as the Hosting glob',
-  /@images path \*\.png \*\.ico \*\.svg \*\.webp/.test(caddy));
+  /@images \{[\s\S]*?path \*\.png \*\.ico \*\.svg \*\.webp/.test(caddy));
 
 const sw = ruleFor('/sw.js');
 check(`sw.js: ${sw['cache-control']}`, caddy.includes(`Cache-Control "${sw['cache-control']}"`));

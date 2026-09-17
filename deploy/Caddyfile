@@ -44,30 +44,40 @@
 	handle {
 		root * {$RIDERHUB_WEB_ROOT:/srv/riderhub/app/frontend/dist}
 
-		# `route` runs these in the order written, rather than Caddy's usual directive
-		# sorting. That matters: the first header block is the safe default and the ones
-		# after it deliberately override the same field for narrower paths.
 		route {
-			# Applies to everything, including the app shell at / and every deep link.
-			# no-cache on the shell is the important one: the HTML names hashed bundles,
-			# so a cached shell keeps riders on the previous release after a deploy.
+			# Security headers, everywhere. Nothing below sets these, so there is no
+			# question of one rule shadowing another.
 			header {
 				X-Content-Type-Options nosniff
 				X-Frame-Options DENY
 				Referrer-Policy strict-origin-when-cross-origin
 				Permissions-Policy "geolocation=(self), camera=(), microphone=()"
-				Cache-Control "no-cache, must-revalidate"
 				-Server
 			}
 
-			# Icons and the splash badge: named, not hashed, so a week is the sensible
-			# compromise between staleness and refetching them constantly.
-			@images path *.png *.ico *.svg *.webp
-			header @images Cache-Control "public, max-age=604800"
+			# Caching is set per path, and the matchers below are deliberately made
+			# mutually exclusive so that exactly one applies to any request.
+			#
+			# It would be shorter to give everything a safe default and override it for
+			# narrower paths, which is how firebase.json does it — but the two hosts
+			# resolve overlapping rules in opposite directions. Firebase applies every
+			# match in order and the last one wins; Caddy's header directives wrap each
+			# other, so the first one written is the outermost and applies last. Written
+			# that way round, a catch-all silently beat the long-lived rules and every
+			# hashed asset came back no-cache. Not overlapping at all is the fix that
+			# does not depend on knowing that.
 
-			# Hashed filenames — the content can never change under a given name, so a
-			# year is safe. Listed after @images so hashed images get the year too.
+			# Hashed filenames: the bytes can never change under a given name.
 			header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+			# Icons and the splash badge are named, not hashed, so a week balances
+			# staleness against refetching them constantly. Excludes /assets, which is
+			# already covered above and would otherwise match twice.
+			@images {
+				path *.png *.ico *.svg *.webp
+				not path /assets/*
+			}
+			header @images Cache-Control "public, max-age=604800"
 
 			# A cached service worker is a PWA that can never update itself.
 			header /sw.js {
@@ -79,6 +89,12 @@
 				Cache-Control "no-cache"
 				Content-Type "application/manifest+json"
 			}
+
+			# Everything else is the app shell — index.html under every deep link. It
+			# names the hashed bundles, so caching it pins riders to the previous
+			# release until it expires.
+			@shell not path /assets/* *.png *.ico *.svg *.webp /sw.js /registerSW.js /manifest.webmanifest
+			header @shell Cache-Control "no-cache, must-revalidate"
 
 			# Single-page app: every unknown path is a client-side route, so serve the
 			# shell and let the router decide. Real files still win.
