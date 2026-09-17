@@ -248,9 +248,19 @@ when you are satisfied.
 
 ## When something is wrong
 
-**Nothing loads at all.** Almost always the VCN security list — the iptables half is
-scripted, the console half is not. From your laptop, `curl -v https://rides.example.com`:
-a hang means a firewall, a refused connection means Caddy is not running.
+**Nothing loads at all.** From your laptop, `curl -v https://rides.example.com`:
+
+- It *hangs* → a firewall. Almost always the VCN security list; the iptables half is
+  scripted, the console half is not.
+- It says *connection refused* → Caddy is not running. `journalctl -u caddy -n 20`.
+  The usual cause is another web server already holding port 80 or 443, which makes
+  Caddy exit at startup. `run.sh` names the offender before it gets that far; to look
+  yourself:
+
+  ```bash
+  sudo ss -lptn 'sport = :80 or sport = :443'
+  sudo systemctl disable --now apache2     # or nginx, or whatever it names
+  ```
 
 **"Your connection is not private", or a stranger's web page appears.** The domain
 resolves to a different machine, so Let's Encrypt validated against that one and Caddy

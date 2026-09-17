@@ -415,6 +415,34 @@ DUCKTIMER
   /usr/local/bin/riderhub-duckdns
 fi
 
+# Caddy needs 80 and 443 to itself. If something else holds one, Caddy exits immediately
+# and nothing serves the site — the browser then says only "refused to connect", and the
+# reason is buried in the journal. Name the offender here instead.
+say "Ports"
+# A caddy left running outside systemd would hold the ports and look like a stranger.
+if ! systemctl is-active --quiet caddy && pgrep -x caddy >/dev/null; then
+  warn "A caddy process is running outside systemd — stopping it so the service can have the ports."
+  pkill -x caddy || true
+  sleep 1
+fi
+for p in 80 443; do
+  holder=$(ss -lptnH "sport = :$p" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -1)
+  [[ -z "$holder" || "$holder" == caddy ]] && continue
+  die "Port $p is already held by \"$holder\", so Caddy cannot start and nothing will serve the site.
+
+See exactly what it is:
+
+  sudo ss -lptn 'sport = :$p'
+
+If it is another web server you are not using here, switch it off for good:
+
+  sudo systemctl disable --now $holder
+
+Then run this again. (Disabling stops it now and keeps it from returning after a reboot.
+If you do need that server on this machine, it and RiderHub cannot both own port $p.)"
+done
+echo "80 and 443 are free"
+
 say "Starting"
 # Validate before reloading: a bad Caddyfile would otherwise take the site down.
 ( set -a; source "$ETC/caddy.env"; set +a; caddy validate --config /etc/caddy/Caddyfile ) >/dev/null \
