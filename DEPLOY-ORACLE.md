@@ -221,9 +221,24 @@ owned by another user, and the tree belongs to the `riderhub` service account wh
 script runs as root. If you hit it on an older copy of the script:
 `sudo git config --global --add safe.directory /srv/riderhub/app`.
 
-**The API will not start.** `journalctl -u riderhub-api -n 40`. Nearly always
-`FIREBASE_PRIVATE_KEY` in `/etc/riderhub/api.env` — it must keep its surrounding quotes
-and its literal `\n` escapes.
+**The API will not start** — "Missing Firebase Admin credentials", restarting for ever.
+
+`/etc/riderhub/api.env` is the only file the service reads. Putting the values in
+`backend/.env` on the box does **not** work, and the reason is worth knowing: systemd
+copies every line of `api.env` into the environment, blanks included, and dotenv refuses
+to overwrite a variable that already exists — so an empty value there beats anything
+`backend/.env` has. `run.sh` checks this before building now, and copies values across
+from a `backend/.env` it finds rather than letting the service crash-loop.
+
+By hand:
+
+```bash
+sudo nano /etc/riderhub/api.env
+sudo systemctl restart riderhub-api
+```
+
+`FIREBASE_PRIVATE_KEY` stays on one line, keeping its surrounding quotes and its literal
+`\n` escapes exactly as they appear in the downloaded JSON.
 
 **API calls return HTML.** The `handle /api/*` block is missing or ordered after the
 catch-all, so the app shell is answering. `node tests/phase40.mjs` catches that before a
