@@ -2,9 +2,12 @@
 #
 # RiderHub on Oracle Cloud — one command, every time.
 #
-#   sudo ./run.sh                  provision on the first run, update on every run after
-#   sudo ./run.sh --no-pull        build and restart what is already checked out
-#   sudo ./run.sh --status         what is running, and recent logs
+#   sudo ./run.sh                     provision on the first run, update on every run after
+#   sudo ./run.sh --no-pull           build and restart what is already checked out
+#   sudo ./run.sh --status            what is running, and recent logs
+#   sudo ./run.sh --whoami            this machine's address vs where the domain points
+#   sudo ./run.sh --domain=host.name  serve a different hostname
+#   sudo ./run.sh --duckdns=<token>   point a DuckDNS name here, and keep it pointed here
 #
 # First run: installs Node and Caddy, creates the service user, opens the instance
 # firewall, writes the configuration files, builds both halves, and starts everything
@@ -24,10 +27,12 @@ API_PORT_DEFAULT=8731
 
 PULL=1
 DUCKDNS_TOKEN=""
+NEW_DOMAIN=""
 for arg in "$@"; do
   case "$arg" in
     --no-pull) PULL=0 ;;
     --duckdns=*) DUCKDNS_TOKEN="${arg#*=}" ;;
+    --domain=*) NEW_DOMAIN="${arg#*=}" ;;
     --whoami)
       # What the outside world thinks this machine is, versus where the name points.
       # A mismatch is the whole story behind "certificate has expired" and a stranger's
@@ -78,13 +83,14 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
 fi
 
 FIRST_RUN=0
+DOMAIN_CHANGED=0
 [[ -f "$ETC/caddy.env" ]] || FIRST_RUN=1
 
 # ─────────────────────────────── first run only ───────────────────────────────
 if [[ $FIRST_RUN -eq 1 ]]; then
   say "First run — setting the machine up"
 
-  DOMAIN="${RIDERHUB_DOMAIN:-}"
+  DOMAIN="${NEW_DOMAIN:-${RIDERHUB_DOMAIN:-}}"
   ACME_EMAIL="${RIDERHUB_ACME_EMAIL:-}"
   if [[ -z "$DOMAIN" ]]; then
     read -rp "Hostname the club will use (e.g. rides.example.com, or yourclub.duckdns.org): " DOMAIN
@@ -189,6 +195,37 @@ BLANK
     chmod 600 "$ETC/api.env"
     [[ -n "$SEED" ]] && echo "seeded $ETC/api.env from $SEED" || echo "created $ETC/api.env (blank — fill it in)"
   fi
+fi
+
+# Changing the hostname touches configuration only. The browser bundle is not involved:
+# it calls /api on whatever origin it was opened from, so there is nothing to rebuild and
+# no stale address baked into a build somewhere.
+set_env_var() {
+  local file=$1 key=$2 val=$3
+  if grep -qE "^$key=" "$file" 2>/dev/null; then
+    sed -i -E "s|^$key=.*|$key=$val|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$val" >> "$file"
+  fi
+}
+
+if [[ -n "$NEW_DOMAIN" && $FIRST_RUN -eq 0 ]]; then
+  [[ "$NEW_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \
+    || die "\"$NEW_DOMAIN\" is not a hostname. Give the bare name, e.g. --domain=rides.example.com (no https://, no trailing slash)."
+  OLD_DOMAIN=$(grep -E '^RIDERHUB_DOMAIN=' "$ETC/caddy.env" | cut -d= -f2-)
+  say "Changing the hostname: $OLD_DOMAIN → $NEW_DOMAIN"
+  set_env_var "$ETC/caddy.env" RIDERHUB_DOMAIN "$NEW_DOMAIN"
+  set_env_var "$ETC/api.env"   FRONTEND_URL    "https://$NEW_DOMAIN"
+  # Keep the DuckDNS updater in step, or it would keep refreshing the old name.
+  if [[ -f "$ETC/duckdns.env" ]]; then
+    if [[ "$NEW_DOMAIN" == *.duckdns.org ]]; then
+      set_env_var "$ETC/duckdns.env" RIDERHUB_DUCKDNS_SUB "${NEW_DOMAIN%%.duckdns.org}"
+    else
+      systemctl disable --now riderhub-duckdns.timer >/dev/null 2>&1 || true
+      warn "The new name is not a DuckDNS one, so the DuckDNS updater has been switched off."
+    fi
+  fi
+  DOMAIN_CHANGED=1
 fi
 
 # ─────────────────────────── every run, including the first ───────────────────────────
@@ -405,6 +442,30 @@ done
 printf '\n\033[32m✔ RiderHub is running\033[0m\n'
 echo "   https://$RIDERHUB_DOMAIN"
 echo "   API on 127.0.0.1:$PORT, reachable only through Caddy"
+
+if [[ $DOMAIN_CHANGED -eq 1 ]]; then
+  cat <<EOF
+
+The hostname changed, so three things outside this machine need to agree with it.
+Until they do the site will load but sign-in and the map will fail, with nothing
+useful in the browser console:
+
+  1. DNS — $RIDERHUB_DOMAIN must resolve here. Check with:
+         sudo $APP_DIR/run.sh --whoami
+     For a DuckDNS name, point it from this machine:
+         sudo $APP_DIR/run.sh --duckdns=<token>
+
+  2. Firebase Console → Authentication → Settings → Authorized domains
+         add   $RIDERHUB_DOMAIN
+     (and remove the old one once nobody is using it)
+
+  3. Google Cloud → Credentials → browser Maps key → Website restrictions
+         add   https://$RIDERHUB_DOMAIN/*
+
+Caddy requests a certificate for the new name as soon as DNS resolves here; watch it:
+  journalctl -u caddy -f
+EOF
+fi
 
 if [[ $FIRST_RUN -eq 1 ]]; then
   cat <<EOF

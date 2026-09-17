@@ -155,6 +155,35 @@ sudo git -C /srv/riderhub/app remote set-url origin git@github.com:d3addmandal/r
 
 ---
 
+## Changing the hostname
+
+On the box:
+
+```bash
+sudo /srv/riderhub/app/run.sh --domain=rides.example.com
+```
+
+Nothing is rebuilt — the browser bundle calls `/api` on whatever origin it was opened
+from, so no address is baked into it. The command rewrites Caddy's hostname and the API's
+`FRONTEND_URL`, keeps the DuckDNS updater in step (or switches it off if the new name is
+not a DuckDNS one), and reloads.
+
+Three things outside the machine then have to agree, and until they do the site loads but
+sign-in and the map fail with nothing useful in the console — the command prints this list
+at the end too:
+
+1. **DNS** — the new name must resolve to this instance. `--whoami` tells you whether it
+   does. For a real domain, an `A` record; for DuckDNS, `--duckdns=<token>` from here.
+2. **Firebase Console → Authentication → Settings → Authorized domains** — add the new
+   name, remove the old one when nobody is on it.
+3. **Google Cloud → Credentials → browser Maps key → Website restrictions** — add
+   `https://<new name>/*`.
+
+Caddy requests a certificate for the new name as soon as DNS points here; watch it with
+`journalctl -u caddy -f`.
+
+---
+
 ## Every deploy after that
 
 I push to GitHub. You run:
