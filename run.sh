@@ -46,6 +46,11 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
   say "Moving the code to $APP_DIR"
   install -d -m 755 "$APP_HOME"
+  # .env is deliberately left behind: the app directory is world-readable, and the
+  # service reads its secrets from /etc/riderhub/api.env (0600) instead. But remember
+  # where it was, so those values can still be copied into that file below — otherwise
+  # relocating silently loses the one thing worth carrying over.
+  [[ -f "$SRC_DIR/backend/.env" ]] && export RIDERHUB_SEED_ENV="$SRC_DIR/backend/.env"
   rsync -a --delete \
     --exclude .git --exclude node_modules --exclude dist --exclude '.env' \
     "$SRC_DIR"/ "$APP_DIR"/
@@ -139,11 +144,9 @@ EOF
     # If the repo was copied up with a working backend/.env, reuse those values rather
     # than making someone retype keys they already have. Otherwise leave blanks.
     SEED=""
-    if [[ -f "$SRC_DIR/backend/.env" ]]; then
-      SEED="$SRC_DIR/backend/.env"
-    elif [[ -f "$APP_DIR/backend/.env" ]]; then
-      SEED="$APP_DIR/backend/.env"
-    fi
+    for candidate in "${RIDERHUB_SEED_ENV:-}" "$SRC_DIR/backend/.env" "$APP_DIR/backend/.env"; do
+      [[ -n "$candidate" && -f "$candidate" ]] && { SEED="$candidate"; break; }
+    done
     {
       echo "# RiderHub API. Restart after editing:  sudo systemctl restart riderhub-api"
       echo "PORT=$API_PORT_DEFAULT"
@@ -173,6 +176,11 @@ fi
 
 # ─────────────────────────── every run, including the first ───────────────────────────
 source "$ETC/caddy.env"
+
+# Bash reads a script in chunks as it executes, by byte offset. Pulling a new version of
+# this very file mid-run can therefore jump execution into the middle of a line. Note
+# what it looked like before the pull so we can restart cleanly if it changed.
+SELF_BEFORE=$(sha256sum "$0" | cut -d' ' -f1)
 
 if [[ $PULL -eq 1 && -d "$APP_DIR/.git" ]]; then
   say "Pulling from GitHub"
@@ -218,6 +226,73 @@ Re-run with --no-pull to build and deploy what is already checked out." ;;
 elif [[ $PULL -eq 1 ]]; then
   warn "Not a git checkout — nothing to pull. Copy the files up again, or clone instead."
 fi
+
+if [[ "$(sha256sum "$0" | cut -d' ' -f1)" != "$SELF_BEFORE" ]]; then
+  say "This script changed in that pull — restarting with the new version"
+  exec "$APP_DIR/run.sh" --no-pull "$@"
+fi
+
+# ── The service reads its configuration from one file, and only one ──────────────────
+#
+# systemd's EnvironmentFile puts every line of /etc/riderhub/api.env into the process
+# environment, blanks included — and dotenv will not overwrite a variable that already
+# exists. So a value left empty there is not a gap that backend/.env can fill in: it
+# actively wins, and the app starts, throws, and is restarted by systemd for ever.
+# Check before building, so the answer arrives in seconds rather than after a crash loop.
+say "Configuration"
+# Last assignment wins, matching how systemd reads the file. Surrounding quotes and
+# stray whitespace come off; anything inside the value is left exactly as it is.
+value_of() {
+  grep -E "^$1=" "$ETC/api.env" 2>/dev/null | tail -1 | cut -d= -f2- \
+    | sed -E 's/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/'
+}
+REQUIRED=(FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY)
+missing=()
+for k in "${REQUIRED[@]}"; do [[ -n "$(value_of "$k")" ]] || missing+=("$k"); done
+
+# A backend/.env sitting on the box is ignored by the service, which is surprising
+# enough that leaving it silent is unkind. If it has what is missing, take it.
+if (( ${#missing[@]} )); then
+  for candidate in "${RIDERHUB_SEED_ENV:-}" "$APP_DIR/backend/.env"; do
+    [[ -n "$candidate" && -f "$candidate" ]] || continue
+    filled=()
+    for k in "${missing[@]}"; do
+      line=$(grep -E "^$k=" "$candidate" | tail -1 || true)
+      [[ -n "$line" && -n "${line#*=}" ]] || continue
+      # Appended, not edited in place: with duplicate keys systemd takes the last one,
+      # so this overrides the blank above it without rewriting anyone's file.
+      printf '%s\n' "$line" >> "$ETC/api.env"
+      filled+=("$k")
+    done
+    if (( ${#filled[@]} )); then
+      echo "took ${filled[*]} from $candidate"
+      warn "$candidate is not read by the service — /etc/riderhub/api.env is. Values copied across."
+      missing=()
+      for k in "${REQUIRED[@]}"; do [[ -n "$(value_of "$k")" ]] || missing+=("$k"); done
+      break
+    fi
+  done
+fi
+
+if (( ${#missing[@]} )); then
+  die "These are empty in $ETC/api.env, and the API cannot start without them:
+
+  ${missing[*]}
+
+  sudo nano $ETC/api.env
+
+FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY come from Firebase Console →
+Project settings → Service accounts → Generate new private key. Paste the private key
+on one line, keeping its surrounding quotes and its literal \\n escapes.
+
+Putting them in backend/.env instead will not work: systemd sets these variables from
+$ETC/api.env before the app runs, and an empty value there beats anything dotenv finds."
+fi
+for k in GOOGLE_MAPS_API_KEY GOOGLE_MAPS_BROWSER_KEY; do
+  [[ -n "$(value_of "$k")" ]] || warn "$k is empty — the app will run, but $([[ $k == *BROWSER* ]] && echo 'the map will not load' || echo 'routing and place search fall back to free alternatives')."
+done
+chmod 600 "$ETC/api.env"
+echo "required values present"
 
 say "Building"
 # devDependencies are needed here: the box compiles TypeScript and runs Vite itself.
