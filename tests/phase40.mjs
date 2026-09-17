@@ -94,6 +94,41 @@ check('it explains deploy keys when a private pull is refused', /Deploy keys/.te
 check('it builds both halves', /backend"\s+run build/.test(run) && /frontend" run build/.test(run));
 check('it installs devDependencies, which the build itself needs', !/--omit=dev/.test(run));
 
+console.log('\n=== THE PUBLIC PORTS ARE NOT ASSUMED TO BE FREE ===');
+// Another application may already own 80 and 443. Caddy can move; Let's Encrypt cannot —
+// the ACME spec fixes validation to those two ports — so moving has to bring the DNS
+// challenge with it, or no certificate is ever issued and the site cannot be used at all.
+check('the ports are configuration, not baked into the Caddyfile',
+  caddy.includes('{$RIDERHUB_HTTPS_PORT:443}') && caddy.includes('{$RIDERHUB_HTTP_PORT:80}'));
+check('the site address carries the chosen https port',
+  caddy.includes('{$RIDERHUB_DOMAIN}:{$RIDERHUB_HTTPS_PORT:443}'));
+check('run.sh takes --https-port and --http-port',
+  run.includes('--https-port=*') && run.includes('--http-port=*'));
+check('it rejects a value that is not a port number', run.includes('is not a port number'));
+check('it falls back to 8443/8080 when the standard ports are taken',
+  run.includes('HTTPS_PORT=8443') && run.includes('HTTP_PORT=8080'));
+check('it names whatever holds a port it needs', run.includes('is held by'));
+check('it opens the chosen ports rather than a hardcoded pair',
+  /for p in "\$HTTPS_PORT" "\$HTTP_PORT"[\s\S]{0,400}--dport "\$p"/.test(run));
+
+console.log('\n=== A CERTIFICATE IS STILL OBTAINABLE ON ODD PORTS ===');
+check('the tls strategy is imported, so one Caddyfile covers both cases',
+  caddy.includes('import /etc/caddy/riderhub-tls.caddy'));
+check('standard ACME is used whenever 80 or 443 is ours',
+  run.includes('"$HTTPS_PORT" == 443 || "$HTTP_PORT" == 80'));
+check('otherwise it switches to the DNS challenge', run.includes('dns duckdns'));
+check('it adds the DNS provider Caddy does not ship with',
+  run.includes('caddy add-package github.com/caddy-dns/duckdns'));
+check('it refuses rather than pretending when no challenge is possible',
+  run.includes('leave no way to get a certificate'));
+check('it asks for the token needed to write the challenge record',
+  run.includes('A DuckDNS token is needed to get a certificate'));
+// That token lands in a file Caddy reads; it must not be readable by everyone.
+check('the snippet holding the token is locked down',
+  run.includes('chmod 600 "$TLS_SNIPPET"') && run.includes('chown caddy:caddy "$TLS_SNIPPET"'));
+check('a non-standard port becomes part of the address riders are given',
+  run.includes('SITE_URL="$SITE_URL:$HTTPS_PORT"'));
+
 console.log('\n=== A DEPLOY CANNOT QUIETLY BREAK THE SITE ===');
 // Anchored to a line of its own: the same words appear in a comment further up, and
 // matching that would have made this check pass for the wrong reason.

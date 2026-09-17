@@ -8,6 +8,8 @@
 #   sudo ./run.sh --whoami            this machine's address vs where the domain points
 #   sudo ./run.sh --domain=host.name  serve a different hostname
 #   sudo ./run.sh --duckdns=<token>   point a DuckDNS name here, and keep it pointed here
+#   sudo ./run.sh --https-port=8443 --http-port=8080
+#                                     when another application already owns 80 and 443
 #
 # First run: installs Node and Caddy, creates the service user, opens the instance
 # firewall, writes the configuration files, builds both halves, and starts everything
@@ -28,11 +30,15 @@ API_PORT_DEFAULT=8731
 PULL=1
 DUCKDNS_TOKEN=""
 NEW_DOMAIN=""
+NEW_HTTPS_PORT=""
+NEW_HTTP_PORT=""
 for arg in "$@"; do
   case "$arg" in
     --no-pull) PULL=0 ;;
     --duckdns=*) DUCKDNS_TOKEN="${arg#*=}" ;;
     --domain=*) NEW_DOMAIN="${arg#*=}" ;;
+    --https-port=*) NEW_HTTPS_PORT="${arg#*=}" ;;
+    --http-port=*)  NEW_HTTP_PORT="${arg#*=}" ;;
     --whoami)
       # What the outside world thinks this machine is, versus where the name points.
       # A mismatch is the whole story behind "certificate has expired" and a stranger's
@@ -231,6 +237,109 @@ fi
 # ─────────────────────────── every run, including the first ───────────────────────────
 source "$ETC/caddy.env"
 
+# ── Which public ports, and how the certificate gets issued ──────────────────────────
+#
+# This machine may already run something on 80 and 443. Caddy can serve on any port, but
+# Let's Encrypt cannot: the ACME spec fixes validation to port 80 (HTTP-01) or port 443
+# (TLS-ALPN-01), and there is no way to move that. So the ports we end up with decide
+# the challenge:
+#
+#   we hold 443  → TLS-ALPN on 443. Port 80 not needed at all.
+#   we hold 80   → HTTP-01 on 80, and HTTPS can live anywhere.
+#   neither      → DNS-01, which needs no inbound port, but needs a DNS provider the
+#                  Caddy binary can talk to — a plugin, added below.
+say "Ports"
+# A caddy left running outside systemd would hold the ports and look like a stranger.
+if ! systemctl is-active --quiet caddy && pgrep -x caddy >/dev/null; then
+  warn "A caddy process is running outside systemd — stopping it so the service can have the ports."
+  pkill -x caddy || true
+  sleep 1
+fi
+port_holder() { ss -lptnH "sport = :$1" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -1; }
+port_available() { local h; h=$(port_holder "$1"); [[ -z "$h" || "$h" == caddy ]]; }
+
+HTTPS_PORT="${NEW_HTTPS_PORT:-${RIDERHUB_HTTPS_PORT:-}}"
+HTTP_PORT="${NEW_HTTP_PORT:-${RIDERHUB_HTTP_PORT:-}}"
+for spec in "HTTPS_PORT:${HTTPS_PORT}" "HTTP_PORT:${HTTP_PORT}"; do
+  v="${spec#*:}"
+  [[ -z "$v" || "$v" =~ ^[0-9]+$ && $v -ge 1 && $v -le 65535 ]] \
+    || die "\"$v\" is not a port number."
+done
+
+# Nothing chosen yet: take the standard ports if they are ours to take, otherwise move.
+if [[ -z "$HTTPS_PORT" ]]; then
+  if port_available 443; then HTTPS_PORT=443; else HTTPS_PORT=8443; fi
+fi
+if [[ -z "$HTTP_PORT" ]]; then
+  if port_available 80; then HTTP_PORT=80; else HTTP_PORT=8080; fi
+fi
+set_env_var "$ETC/caddy.env" RIDERHUB_HTTPS_PORT "$HTTPS_PORT"
+set_env_var "$ETC/caddy.env" RIDERHUB_HTTP_PORT  "$HTTP_PORT"
+
+for p in "$HTTPS_PORT" "$HTTP_PORT"; do
+  h=$(port_holder "$p")
+  [[ -z "$h" || "$h" == caddy ]] || die "Port $p is held by \"$h\".
+
+  sudo ss -lptn 'sport = :$p'              # see exactly what it is
+
+Either stop it, or pick different ports:
+
+  sudo $APP_DIR/run.sh --https-port=8443 --http-port=8080"
+done
+echo "https on $HTTPS_PORT, http on $HTTP_PORT"
+
+# Open them on the instance. The Oracle console's VCN security list is a separate
+# firewall and has to be done by hand — see the note at the end of a first run.
+for p in "$HTTPS_PORT" "$HTTP_PORT"; do
+  iptables -C INPUT -p tcp --dport "$p" -m state --state NEW -j ACCEPT 2>/dev/null \
+    || { iptables -I INPUT 6 -p tcp --dport "$p" -m state --state NEW -j ACCEPT; echo "opened $p"; }
+done
+command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
+
+TLS_SNIPPET=/etc/caddy/riderhub-tls.caddy
+if [[ "$HTTPS_PORT" == 443 || "$HTTP_PORT" == 80 ]]; then
+  printf '# Certificate over port %s. No DNS challenge needed.\n' \
+    "$([[ "$HTTPS_PORT" == 443 ]] && echo '443 (TLS-ALPN-01)' || echo '80 (HTTP-01)')" > "$TLS_SNIPPET"
+  chmod 644 "$TLS_SNIPPET"
+  echo "certificate: standard ACME"
+else
+  # Neither standard port is ours, so the only route left is proving control of the DNS
+  # record. Caddy's default binary has no DNS providers compiled in; add the one for
+  # DuckDNS. The same token that updates the address also writes the challenge record.
+  [[ "$RIDERHUB_DOMAIN" == *.duckdns.org ]] || die "Ports $HTTPS_PORT/$HTTP_PORT leave no way to get a certificate.
+
+Let's Encrypt validates only on port 80 or 443, so with neither available the DNS
+challenge is the only option — and that needs a DNS provider Caddy has a plugin for.
+$RIDERHUB_DOMAIN is not a DuckDNS name, which is the one wired up here.
+
+Either free port 80 or 443 on this machine, or move the domain to DuckDNS."
+
+  TOKEN="${DUCKDNS_TOKEN:-}"
+  if [[ -z "$TOKEN" && -f "$ETC/duckdns.env" ]]; then
+    TOKEN=$(grep -E '^RIDERHUB_DUCKDNS_TOKEN=' "$ETC/duckdns.env" | cut -d= -f2-)
+  fi
+  [[ -n "$TOKEN" ]] || die "A DuckDNS token is needed to get a certificate on these ports.
+
+Ports 80 and 443 are both taken, so the certificate has to come from the DNS challenge,
+which proves control by writing a TXT record. Pass the token from your duckdns.org page:
+
+  sudo $APP_DIR/run.sh --duckdns=<token>"
+
+  if ! caddy list-modules 2>/dev/null | grep -qx 'dns.providers.duckdns'; then
+    say "Adding the DuckDNS module to Caddy"
+    # Replaces the binary with one that has the plugin compiled in, and restarts.
+    caddy add-package github.com/caddy-dns/duckdns \
+      || die "Could not add the DuckDNS module. With no inbound port free and no DNS
+provider, a certificate cannot be issued. Freeing port 80 or 443 is the alternative."
+  fi
+  printf 'tls {\n\tdns duckdns %s\n}\n' "$TOKEN" > "$TLS_SNIPPET"
+  chown caddy:caddy "$TLS_SNIPPET" 2>/dev/null || true
+  chmod 600 "$TLS_SNIPPET"
+  echo "certificate: DNS challenge via DuckDNS (neither 80 nor 443 is free)"
+fi
+
+source "$ETC/caddy.env"
+
 # Bash reads a script in chunks as it executes, by byte offset. Pulling a new version of
 # this very file mid-run can therefore jump execution into the middle of a line. Note
 # what it looked like before the pull so we can restart cleanly if it changed.
@@ -415,34 +524,6 @@ DUCKTIMER
   /usr/local/bin/riderhub-duckdns
 fi
 
-# Caddy needs 80 and 443 to itself. If something else holds one, Caddy exits immediately
-# and nothing serves the site — the browser then says only "refused to connect", and the
-# reason is buried in the journal. Name the offender here instead.
-say "Ports"
-# A caddy left running outside systemd would hold the ports and look like a stranger.
-if ! systemctl is-active --quiet caddy && pgrep -x caddy >/dev/null; then
-  warn "A caddy process is running outside systemd — stopping it so the service can have the ports."
-  pkill -x caddy || true
-  sleep 1
-fi
-for p in 80 443; do
-  holder=$(ss -lptnH "sport = :$p" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -1)
-  [[ -z "$holder" || "$holder" == caddy ]] && continue
-  die "Port $p is already held by \"$holder\", so Caddy cannot start and nothing will serve the site.
-
-See exactly what it is:
-
-  sudo ss -lptn 'sport = :$p'
-
-If it is another web server you are not using here, switch it off for good:
-
-  sudo systemctl disable --now $holder
-
-Then run this again. (Disabling stops it now and keeps it from returning after a reboot.
-If you do need that server on this machine, it and RiderHub cannot both own port $p.)"
-done
-echo "80 and 443 are free"
-
 say "Starting"
 # Validate before reloading: a bad Caddyfile would otherwise take the site down.
 ( set -a; source "$ETC/caddy.env"; set +a; caddy validate --config /etc/caddy/Caddyfile ) >/dev/null \
@@ -467,9 +548,12 @@ for i in $(seq 1 25); do
   sleep 1
 done
 
+SITE_URL="https://$RIDERHUB_DOMAIN"
+[[ "$HTTPS_PORT" != 443 ]] && SITE_URL="$SITE_URL:$HTTPS_PORT"
 printf '\n\033[32m✔ RiderHub is running\033[0m\n'
-echo "   https://$RIDERHUB_DOMAIN"
+echo "   $SITE_URL"
 echo "   API on 127.0.0.1:$PORT, reachable only through Caddy"
+[[ "$HTTPS_PORT" != 443 ]] && echo "   The port is part of the address — riders need the whole URL, including :$HTTPS_PORT"
 
 if [[ $DOMAIN_CHANGED -eq 1 ]]; then
   cat <<EOF
@@ -500,8 +584,9 @@ if [[ $FIRST_RUN -eq 1 ]]; then
 
 Still to do, once each:
 
-  1. Oracle console → Networking → VCN → Security Lists → add ingress for TCP 80 and 443.
-     The iptables half is done; without the console half nothing can reach this machine.
+  1. Oracle console → Networking → VCN → Security Lists → add ingress for TCP
+     $HTTPS_PORT and $HTTP_PORT. The iptables half is done; without the console half,
+     nothing can reach this machine.
 
   2. DNS:  $RIDERHUB_DOMAIN  A  $(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '<this instance public IP>')
      Caddy cannot get a certificate until that resolves here.
@@ -513,7 +598,7 @@ Still to do, once each:
      $RIDERHUB_DOMAIN   (sign-in is refused from anywhere not listed)
 
   5. Google Cloud → Credentials → browser Maps key → Website restrictions → add
-     https://$RIDERHUB_DOMAIN/*   (otherwise the map silently fails to load)
+     $SITE_URL/*   (otherwise the map silently fails to load)
 
 From then on, to deploy whatever has been pushed to GitHub:
 

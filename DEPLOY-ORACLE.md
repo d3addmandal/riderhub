@@ -155,6 +155,53 @@ sudo git -C /srv/riderhub/app remote set-url origin git@github.com:d3addmandal/r
 
 ---
 
+## When another application already owns 80 and 443
+
+Caddy will move to any port. Let's Encrypt will not: the ACME spec fixes validation to
+port **80** (HTTP-01) or port **443** (TLS-ALPN-01), and there is no setting that changes
+that. So which ports are free decides how the certificate is obtained, and `run.sh`
+works it out for you:
+
+| What is free | Serves on | Certificate |
+|---|---|---|
+| 443 | 443 — clean URL, no port to type | TLS-ALPN-01 on 443. Port 80 not needed. |
+| 80 only | whatever you choose | HTTP-01 on 80 |
+| neither | whatever you choose | **DNS-01** — no inbound port at all |
+
+Run it with the ports you want:
+
+```bash
+sudo /srv/riderhub/app/run.sh --https-port=8443 --http-port=8080
+```
+
+With nothing specified it probes 443 and 80 and keeps them if it can, so you only need
+the flags when something else is in the way.
+
+**If neither 80 nor 443 is free**, the DNS challenge is the only route, and two things
+follow. The domain must be a DuckDNS name (that is the provider wired up here), and Caddy
+needs a plugin it does not ship with — `run.sh` installs it with
+`caddy add-package github.com/caddy-dns/duckdns`, which swaps in a binary that has it
+compiled in. Pass the token once:
+
+```bash
+sudo /srv/riderhub/app/run.sh --https-port=8443 --http-port=8080 --duckdns=<token>
+```
+
+Then three consequences of a non-standard port, none of them optional:
+
+- **The port is part of the address.** Riders open `https://name.duckdns.org:8443` — the
+  whole thing, every time. Installing to a home screen keeps it, but a link without the
+  port goes nowhere.
+- **Open the port in the Oracle VCN security list**, not just iptables. `run.sh` does the
+  iptables half for whichever ports you chose.
+- **Firebase and Google Maps** need the new origin: Authorized domains takes the hostname,
+  and the Maps key's website restrictions take `https://name.duckdns.org:8443/*`.
+
+Freeing port 443 is worth real effort before accepting this — a URL with a port in it is
+something you will be explaining to every rider who joins.
+
+---
+
 ## Changing the hostname
 
 On the box:

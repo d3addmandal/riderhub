@@ -1,24 +1,32 @@
-# RiderHub on Oracle Cloud — the whole application behind one hostname.
+# RiderHub — the whole application behind one hostname.
 #
-# Caddy is the only thing listening on a public port. It terminates TLS, serves the PWA
-# straight off disk, and hands /api to the Express process on a non-standard port bound
-# to localhost, which nothing outside the machine can reach. The rider sees one origin,
-# so there is no CORS, no mixed content, and no second certificate.
+# Caddy terminates TLS, serves the PWA straight off disk, and hands /api to the Express
+# process on a non-standard port bound to localhost, which nothing outside the machine
+# can reach. The rider sees one origin, so there is no CORS, no mixed content, and no
+# second certificate.
 #
-# Caddy obtains and renews the Let's Encrypt certificate by itself. That needs ports 80
-# and 443 open in BOTH Oracle firewalls (VCN security list and the instance's iptables)
-# — see deploy/setup-oracle.sh, which does the iptables half.
+# Ports come from /etc/riderhub/caddy.env, written by run.sh. They are configurable
+# because this machine may already be running something else on 80 and 443.
 #
-# Values come from /etc/riderhub/caddy.env (see setup-oracle.sh).
+# How the certificate is obtained is decided by run.sh too, and lives in the imported
+# snippet: Let's Encrypt validates only on port 80 or port 443 — the ACME spec fixes
+# those — so when neither is available the snippet switches to the DNS challenge, which
+# needs no inbound port at all.
 
 {
-	# Where Let's Encrypt sends expiry warnings if renewal ever stops working.
 	email {$RIDERHUB_ACME_EMAIL}
-	# Caddy's admin socket is localhost-only by default; say so explicitly.
 	admin localhost:2019
+	# Which ports Caddy itself uses for redirects and for ACME.
+	http_port {$RIDERHUB_HTTP_PORT:80}
+	https_port {$RIDERHUB_HTTPS_PORT:443}
 }
 
-{$RIDERHUB_DOMAIN} {
+{$RIDERHUB_DOMAIN}:{$RIDERHUB_HTTPS_PORT:443} {
+	# Either a comment, or a `tls` block using the DNS challenge. Written by run.sh.
+	# It lives under /etc/caddy because it can hold a DNS API token and must be
+	# readable by the caddy user but nobody else.
+	import /etc/caddy/riderhub-tls.caddy
+
 	encode zstd gzip
 
 	# The API. `handle` blocks are mutually exclusive and tried in order, so this wins
