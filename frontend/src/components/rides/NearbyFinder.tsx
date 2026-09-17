@@ -66,9 +66,31 @@ export default function NearbyFinder({
   const scope = scopes.find(s => s.id === scopeId) ?? scopes[0];
   const meta = POI_KIND_META[kind];
 
+  /*
+   * Where this search is anchored — captured once, then held.
+   *
+   * "Near me" follows a live GPS watch, and on a phone that reports a slightly different
+   * position every second even standing still. Following it meant the effect below
+   * re-ran on every tick: it clears the list and shows the spinner before each fetch, so
+   * the sheet visibly blinked and results reshuffled under the rider's thumb while they
+   * were trying to tap one.
+   *
+   * Holding the anchor also matches what the rider is doing. They open the sheet to read
+   * a list and pick a place; a list that keeps changing is worse, not fresher. "Search
+   * again" below re-anchors on demand for anyone who has genuinely moved on.
+   */
+  const [anchor, setAnchor] = useState<{ lat: number; lng: number } | null>(null);
+  useEffect(() => { setAnchor(null); }, [open, scopeId]);
+  useEffect(() => {
+    if (!open || anchor || !scope?.at) return;
+    setAnchor({ lat: scope.at.lat, lng: scope.at.lng });
+  }, [open, anchor, scope?.at?.lat, scope?.at?.lng]);
+
   useEffect(() => {
     if (!open || !scope) return;
     if (scope.disabled) { setResults([]); setError(scope.disabled); return; }
+    // A point scope with no anchor yet is simply waiting for its first fix.
+    if (!scope.points?.length && !anchor) return;
 
     let cancelled = false;
     (async () => {
@@ -77,8 +99,8 @@ export default function NearbyFinder({
         const alongRoute = !!scope.points?.length;
         const body = alongRoute
           ? { kind, points: scope.points, radius_m: radiusKm * 1000, spacing_m: 25000, max_anchors: 5 }
-          : scope.at
-            ? { kind, lat: scope.at.lat, lng: scope.at.lng, radius_m: radiusKm * 1000 }
+          : anchor
+            ? { kind, lat: anchor.lat, lng: anchor.lng, radius_m: radiusKm * 1000 }
             : null;
 
         if (!body) { setError('No position to search around yet.'); return; }
@@ -94,7 +116,9 @@ export default function NearbyFinder({
     })();
 
     return () => { cancelled = true; };
-  }, [open, kind, radiusKm, scopeId, scope?.at?.lat, scope?.at?.lng, scope?.points?.length]);
+    // Deliberately keyed on the held anchor, never on scope.at: the live position
+    // changes every second and re-running on it is what made the sheet blink.
+  }, [open, kind, radiusKm, scopeId, anchor?.lat, anchor?.lng, scope?.points?.length]);
 
   async function add(p: Poi) {
     if (!onAdd || !scope) return;
@@ -138,6 +162,14 @@ export default function NearbyFinder({
               {km} km
             </Chip>
           ))}
+          {/* The anchor is held while the sheet is open so the list stays still. This is
+              how a rider who has covered ground since opening it asks again from here. */}
+          {!scope?.points?.length && (
+            <Chip selected={false} onClick={() => setAnchor(null)} disabled={loading}
+                  title="Search again from where you are now">
+              Search again
+            </Chip>
+          )}
         </ChipRow>
 
         <p className="text-muted text-[11px]">

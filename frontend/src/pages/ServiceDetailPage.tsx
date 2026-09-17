@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ServiceRecord } from '../types';
 import { Button, Card, Spinner, Empty, Badge } from '../components/ui';
+import ServiceFormModal from '../components/service/ServiceFormModal';
 import { formatCurrency, formatDate } from '../lib/utils';
 
 /** Full detail for one service (spec §8.2). */
@@ -10,6 +12,7 @@ export default function ServiceDetailPage() {
   const { serviceId } = useParams<{ serviceId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
 
   const { data: record, isLoading } = useQuery<ServiceRecord>({
     queryKey: ['service', serviceId],
@@ -112,6 +115,11 @@ export default function ServiceDetailPage() {
           </a>
         )}
 
+        {/* Edit before delete, and the more prominent of the two: correcting a mistyped
+            odometer or a missing part is the common case, and deleting to re-enter would
+            lose the service number and the maintenance reset that came with it. */}
+        <Button fullWidth onClick={() => setEditing(true)}>Edit service</Button>
+
         <Button
           variant="danger"
           fullWidth
@@ -122,6 +130,8 @@ export default function ServiceDetailPage() {
         >Delete service
         </Button>
       </div>
+
+      <ServiceFormModal open={editing} onClose={() => setEditing(false)} record={record} />
     </div>
   );
 }
