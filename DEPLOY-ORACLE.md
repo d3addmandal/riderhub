@@ -52,8 +52,30 @@ Missing the console half is the single most common reason the site appears dead.
 rides.example.com.   A   <instance public IP>
 ```
 
-No domain? A free [DuckDNS](https://www.duckdns.org) name works. Caddy cannot obtain a
-certificate until this resolves to the instance.
+No domain? A free [DuckDNS](https://www.duckdns.org) name works — but **set it from the
+server, not from your laptop.** DuckDNS records the address of whoever asks, so clicking
+"update ip" in a browser at the office points the name at the office connection, and
+whatever answers there serves your domain instead. The symptom is a certificate error
+naming a machine you have never heard of.
+
+From the instance:
+
+```bash
+sudo /srv/riderhub/app/run.sh --duckdns=<your-duckdns-token>
+```
+
+That points the name here now and installs a timer that keeps it pointed here — which
+matters because an Oracle public address is *ephemeral* by default and changes when the
+instance is stopped and started. (Alternatively, reserve the IP in the Oracle console and
+the name never needs updating again.)
+
+To check at any time which machine the name resolves to, and whether that is this one:
+
+```bash
+sudo /srv/riderhub/app/run.sh --whoami
+```
+
+Caddy cannot obtain a certificate until the name resolves to the instance.
 
 ### 4. Get the code onto the box and run it
 
@@ -201,9 +223,12 @@ when you are satisfied.
 scripted, the console half is not. From your laptop, `curl -v https://rides.example.com`:
 a hang means a firewall, a refused connection means Caddy is not running.
 
-**"Your connection is not private".** Caddy could not get a certificate.
-`journalctl -u caddy -n 50` says why — nearly always DNS not yet pointing here, or port
-80 blocked, which Let's Encrypt needs for validation.
+**"Your connection is not private", or a stranger's web page appears.** The domain
+resolves to a different machine, so Let's Encrypt validated against that one and Caddy
+never got a certificate. Check with `sudo /srv/riderhub/app/run.sh --whoami`; if the two
+addresses differ, fix the DNS record (for DuckDNS, `--duckdns=<token>` from the server).
+Otherwise `journalctl -u caddy -n 50` says what else went wrong — usually port 80
+blocked, which Let's Encrypt needs for validation.
 
 **The app loads but sign-in fails.** The domain is missing from Firebase → Authentication
 → Authorized domains (step 6).

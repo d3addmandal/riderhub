@@ -23,9 +23,26 @@ ETC=/etc/riderhub
 API_PORT_DEFAULT=8731
 
 PULL=1
+DUCKDNS_TOKEN=""
 for arg in "$@"; do
   case "$arg" in
     --no-pull) PULL=0 ;;
+    --duckdns=*) DUCKDNS_TOKEN="${arg#*=}" ;;
+    --whoami)
+      # What the outside world thinks this machine is, versus where the name points.
+      # A mismatch is the whole story behind "certificate has expired" and a stranger's
+      # web page on your domain: DuckDNS records the IP of whatever network you were
+      # browsing from, which is rarely the server.
+      mine=$(curl -fsS --max-time 8 https://api.ipify.org || echo '?')
+      echo "this machine : $mine"
+      if [[ -f /etc/riderhub/caddy.env ]]; then
+        . /etc/riderhub/caddy.env
+        theirs=$(getent hosts "$RIDERHUB_DOMAIN" | awk '{print $1}' | head -1)
+        echo "$RIDERHUB_DOMAIN resolves to : ${theirs:-<nothing>}"
+        [[ "$mine" == "$theirs" ]] && echo "match — DNS is correct" \
+          || echo "MISMATCH — the domain points somewhere else, so no certificate can be issued"
+      fi
+      exit 0 ;;
     --status)  systemctl status riderhub-api caddy --no-pager -l | head -40
                echo; journalctl -u riderhub-api -n 25 --no-pager; exit 0 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
@@ -315,6 +332,51 @@ install -d /etc/systemd/system/caddy.service.d
 printf '[Service]\nEnvironmentFile=%s/caddy.env\n' "$ETC" > /etc/systemd/system/caddy.service.d/riderhub.conf
 chown -R riderhub:riderhub "$APP_HOME"
 systemctl daemon-reload
+
+# DuckDNS, if asked for. Oracle hands out ephemeral public addresses that change when an
+# instance is stopped and started, and the record has to be set from the server itself —
+# setting it from a laptop points the name at your office or home connection, which is
+# how a stranger's web server ends up answering for your domain.
+if [[ -n "$DUCKDNS_TOKEN" ]]; then
+  say "DuckDNS"
+  SUB="${RIDERHUB_DOMAIN%%.duckdns.org}"
+  [[ "$SUB" != "$RIDERHUB_DOMAIN" ]] || die "--duckdns only applies to a *.duckdns.org name; yours is $RIDERHUB_DOMAIN"
+  printf 'RIDERHUB_DUCKDNS_SUB=%s\nRIDERHUB_DUCKDNS_TOKEN=%s\n' "$SUB" "$DUCKDNS_TOKEN" > "$ETC/duckdns.env"
+  chmod 600 "$ETC/duckdns.env"
+  cat > /usr/local/bin/riderhub-duckdns <<'DUCK'
+#!/usr/bin/env bash
+# Point the DuckDNS name at whatever address this machine currently has. No ip= argument:
+# DuckDNS then uses the source address of this request, which is the server's own.
+set -euo pipefail
+. /etc/riderhub/duckdns.env
+out=$(curl -fsS --max-time 20 \
+  "https://www.duckdns.org/update?domains=${RIDERHUB_DUCKDNS_SUB}&token=${RIDERHUB_DUCKDNS_TOKEN}&ip=")
+[[ "$out" == OK ]] || { echo "DuckDNS refused the update: $out" >&2; exit 1; }
+echo "DuckDNS updated"
+DUCK
+  chmod 755 /usr/local/bin/riderhub-duckdns
+  cat > /etc/systemd/system/riderhub-duckdns.service <<'DUCKSVC'
+[Unit]
+Description=Point the DuckDNS name at this machine
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/riderhub-duckdns
+DUCKSVC
+  cat > /etc/systemd/system/riderhub-duckdns.timer <<'DUCKTIMER'
+[Unit]
+Description=Keep the DuckDNS name pointed at this machine
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+[Install]
+WantedBy=timers.target
+DUCKTIMER
+  systemctl daemon-reload
+  systemctl enable --now riderhub-duckdns.timer >/dev/null
+  /usr/local/bin/riderhub-duckdns
+fi
 
 say "Starting"
 # Validate before reloading: a bad Caddyfile would otherwise take the site down.
