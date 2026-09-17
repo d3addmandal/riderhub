@@ -332,6 +332,21 @@ owned by another user, and the tree belongs to the `riderhub` service account wh
 script runs as root. If you hit it on an older copy of the script:
 `sudo git config --global --add safe.directory /srv/riderhub/app`.
 
+**Riders can sign in, but nothing they enter is ever saved.** The Admin credentials are
+not being accepted by Google. Verifying an ID token needs no credentials, so sign-in keeps
+working perfectly while every read and write fails — which makes this look like an app bug
+rather than a configuration one. Check it directly:
+
+```bash
+sudo bash -c 'set -a; . /etc/riderhub/api.env; set +a; node /srv/riderhub/app/scripts/check-firestore.cjs'
+```
+
+It names the cause: a deleted service account, a revoked key, a missing role, or no
+Firestore database at all. A deploy runs this too, so it should not reach you this way
+again. The usual fix is Firebase Console → Project settings → Service accounts →
+**Generate new private key**, then put `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`
+from the downloaded JSON into `/etc/riderhub/api.env` and restart.
+
 **The API will not start** — "Missing Firebase Admin credentials", restarting for ever.
 
 `/etc/riderhub/api.env` is the only file the service reads. Putting the values in

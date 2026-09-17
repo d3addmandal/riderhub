@@ -147,6 +147,8 @@ check('the release guards run before the service is restarted',
 check('the Caddyfile is validated before it is reloaded',
   /caddy validate/.test(run) && run.indexOf('caddy validate') < run.indexOf('systemctl reload caddy'));
 check('a bad Caddyfile leaves the running site alone', /the site is still up/.test(run));
+check('the database is proved reachable, not just the process',
+  run.includes('check-firestore.cjs') && existsSync('scripts/check-firestore.cjs'));
 check('success is not claimed until the API answers',
   run.includes('/health') && /journalctl -u riderhub-api/.test(run));
 check('it opens both 80 and 443 in the instance firewall', /for port in 80 443/.test(run));

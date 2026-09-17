@@ -548,6 +548,14 @@ for i in $(seq 1 25); do
   sleep 1
 done
 
+# /health only proves the process is up. It answers perfectly well with credentials that
+# Google has stopped accepting — and then riders sign in (which needs no credentials) and
+# find that nothing they enter is ever saved. Check the credentials properly.
+say "Firestore"
+( set -a; . "$ETC/api.env"; set +a; node "$APP_DIR/scripts/check-firestore.cjs" ) \
+  || die "The site is up, but the API cannot reach the database, so nothing riders enter
+will be saved. Fix the credentials above and run this again."
+
 SITE_URL="https://$RIDERHUB_DOMAIN"
 [[ "$HTTPS_PORT" != 443 ]] && SITE_URL="$SITE_URL:$HTTPS_PORT"
 printf '\n\033[32m✔ RiderHub is running\033[0m\n'
