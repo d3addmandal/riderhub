@@ -176,19 +176,45 @@ source "$ETC/caddy.env"
 
 if [[ $PULL -eq 1 && -d "$APP_DIR/.git" ]]; then
   say "Pulling from GitHub"
-  if ! git -C "$APP_DIR" pull --ff-only 2>&1; then
-    die "Could not pull. For a private repo the machine needs read access:
+
+  # Git refuses to operate on a repository owned by somebody else — a good default
+  # against a planted repo in a shared directory. Here it is expected: the tree belongs
+  # to the service account and this script runs as root. Declare this one path safe.
+  git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$APP_DIR" \
+    || git config --global --add safe.directory "$APP_DIR"
+
+  if ! PULL_OUT=$(git -C "$APP_DIR" pull --ff-only 2>&1); then
+    echo "$PULL_OUT"
+    # Say what git actually said, then what to do about that specific thing. Guessing a
+    # single cause here once sent someone hunting for a credentials problem when the
+    # repository was public and git was complaining about file ownership.
+    case "$PULL_OUT" in
+      *"could not read Username"*|*"Authentication failed"*|*"Permission denied (publickey)"*|*"access rights"*|*"Repository not found"*)
+        die "GitHub would not let this machine read the repository.
+
+If it is private, give the box its own read-only key:
 
   sudo -u riderhub ssh-keygen -t ed25519 -N '' -f $APP_HOME/.ssh/id_ed25519
   sudo cat $APP_HOME/.ssh/id_ed25519.pub
 
-Add that key at GitHub → repository → Settings → Deploy keys → Add deploy key
-(read-only is enough), then set the remote to SSH:
+Add it at GitHub → repository → Settings → Deploy keys, then switch the remote:
 
-  git -C $APP_DIR remote set-url origin git@github.com:d3addmandal/riderhub.git
+  sudo git -C $APP_DIR remote set-url origin git@github.com:d3addmandal/riderhub.git
 
-Or re-run with --no-pull to build what is already here."
+If it is public, check the remote URL is right:  git -C $APP_DIR remote -v" ;;
+      *"diverged"*|*"non-fast-forward"*|*"would be overwritten"*|*"local changes"*)
+        die "This checkout has changes that are not on GitHub, so a fast-forward is impossible.
+
+  sudo git -C $APP_DIR status          # see what differs
+  sudo git -C $APP_DIR reset --hard origin/main   # discard them and match GitHub
+
+The second command throws away local edits — only run it once you have looked." ;;
+      *)
+        die "git pull failed; the message above is git's own.
+Re-run with --no-pull to build and deploy what is already checked out." ;;
+    esac
   fi
+  echo "$PULL_OUT"
 elif [[ $PULL -eq 1 ]]; then
   warn "Not a git checkout — nothing to pull. Copy the files up again, or clone instead."
 fi

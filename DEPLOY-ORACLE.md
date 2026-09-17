@@ -110,9 +110,11 @@ Both are easy to forget and both fail confusingly:
 - **Google Cloud → Credentials → browser Maps key → Website restrictions** → add
   `https://rides.example.com/*`. Otherwise the map silently fails to load.
 
-### 7. Private repo: let the machine pull
+### 7. Only if the repo is private: let the machine pull
 
-The repo is private, so `git pull` needs read access. Generate a key on the box and
+A public repo needs nothing here — `run.sh` clones and pulls over HTTPS.
+
+If you make it private again, `git pull` needs read access. Generate a key on the box and
 register it as a **deploy key** (read-only is enough):
 
 ```bash
@@ -209,8 +211,15 @@ a hang means a firewall, a refused connection means Caddy is not running.
 **The map never appears.** The browser key's referrer restrictions do not include the new
 domain (step 6), or `GOOGLE_MAPS_BROWSER_KEY` is blank in `/etc/riderhub/api.env`.
 
-**`run.sh` fails at "Pulling from GitHub".** The deploy key is missing or the remote is
-still an HTTPS URL — step 7. `--no-pull` gets you unblocked meanwhile.
+**`run.sh` fails at "Pulling from GitHub".** It prints git's own message and then what
+to do about that particular one — authentication (step 7, private repos only), or a
+checkout that has drifted from GitHub and cannot fast-forward. `--no-pull` builds and
+deploys what is already there meanwhile.
+
+"detected dubious ownership" is handled automatically now: git distrusts a repository
+owned by another user, and the tree belongs to the `riderhub` service account while the
+script runs as root. If you hit it on an older copy of the script:
+`sudo git config --global --add safe.directory /srv/riderhub/app`.
 
 **The API will not start.** `journalctl -u riderhub-api -n 40`. Nearly always
 `FIREBASE_PRIVATE_KEY` in `/etc/riderhub/api.env` — it must keep its surrounding quotes
