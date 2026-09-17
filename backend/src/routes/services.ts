@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { queryAll, deleteOwned, getOwned, bikeMap, withBike, bumpOdometer, now, defined, sortBy } from '../lib/firestore';
 import { matchComponentKey } from '../lib/maintenance';
 import { ensureComponents } from '../lib/maintenanceRepo';
+import { resolveIssues } from './issues';
 import { AuthRequest } from '../types';
 
 const router = Router();
@@ -32,6 +33,13 @@ const serviceSchema = z.object({
   next_service_km: z.number().int().min(0).optional(),
   next_service_date: z.string().optional(),
   parts: z.array(partSchema).optional(),
+
+  /**
+   * Notes from the rider's issue log that this visit dealt with. Sent with the service
+   * so that "what I asked them to look at" and "what they did" are recorded together,
+   * which is the whole point of keeping the log.
+   */
+  resolved_issue_ids: z.array(z.string()).optional(),
 
   // ── Cost breakdown (spec §8.3) ─────────────────────────────
   // The total is always computed here rather than trusted from the client, so the
@@ -66,7 +74,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
 
   try {
-    const { parts, ...serviceData } = parsed.data;
+    const { parts, resolved_issue_ids, ...serviceData } = parsed.data;
 
     // Parts only ever belong to one service record and are always read with it,
     // so they live inline rather than in their own collection.
@@ -121,7 +129,17 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
       ].filter(Boolean),
     });
 
-    res.status(201).json({ id: ref.id, ...payload, maintenance_updated: maintenanceUpdated });
+    // Close the rider's notes only once the service record exists to point them at.
+    const issuesClosed = resolved_issue_ids?.length
+      ? await resolveIssues(resolved_issue_ids, req.user!.id, ref.id)
+      : [];
+
+    res.status(201).json({
+      id: ref.id, ...payload,
+      resolved_issue_ids: resolved_issue_ids ?? [],
+      maintenance_updated: maintenanceUpdated,
+      issues_closed: issuesClosed,
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -145,7 +163,7 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   if (!existing) { res.status(404).json({ error: 'Service record not found' }); return; }
 
   try {
-    const { parts, ...rest } = parsed.data;
+    const { parts, resolved_issue_ids, ...rest } = parsed.data;
 
     const service_parts = parts
       ? parts.map((p, i) => ({
@@ -180,8 +198,12 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
       await bumpOdometer(existing.motorcycle_id, req.user!.id, rest.odometer);
     }
 
+    const issuesClosed = resolved_issue_ids?.length
+      ? await resolveIssues(resolved_issue_ids, req.user!.id, req.params.id)
+      : [];
+
     const saved = await ref.get();
-    res.json({ id: saved.id, ...saved.data() });
+    res.json({ id: saved.id, ...saved.data(), issues_closed: issuesClosed });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

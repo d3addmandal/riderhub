@@ -13,6 +13,7 @@ import documentsRouter from './documents';
 import remindersRouter from './reminders';
 import analyticsRouter from './analytics';
 import sosRouter from './sos';
+import issuesRouter from './issues';
 
 export const router = Router();
 
@@ -30,3 +31,4 @@ router.use('/documents', documentsRouter);
 router.use('/reminders', remindersRouter);
 router.use('/analytics', analyticsRouter);
 router.use('/sos', sosRouter);
+router.use('/issues', issuesRouter);

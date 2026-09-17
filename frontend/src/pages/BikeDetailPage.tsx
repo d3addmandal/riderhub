@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { MaintenanceResponse, MaintenanceItem, BikeDashboard } from '../types';
 import { Button, Card, Input, Select, Modal, Spinner, Empty, Badge } from '../components/ui';
+import IssueLog from '../components/service/IssueLog';
 import MaintenanceTile, { remainingText, STATUS_STYLE } from '../components/common/MaintenanceTile';
 import { formatCurrency, formatDate } from '../lib/utils';
 
@@ -122,6 +123,10 @@ export default function BikeDetailPage() {
             </Card>
           </div>
         )}
+
+        {/* What the rider has noticed, ahead of the scheduled clocks below: these are the
+            things they will actually want to read out at the workshop counter. */}
+        <IssueLog bikeId={bikeId!} />
 
         {/* Health summary */}
         <div className="flex gap-2 flex-wrap">

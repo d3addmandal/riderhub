@@ -82,4 +82,5 @@ export const COL = {
   documents: 'documents',
   reminders: 'reminders',
   sosEvents: 'sosEvents',
+  issues: 'issues',        // things the rider noticed, to be fixed at the next service
 } as const;

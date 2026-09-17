@@ -112,6 +112,28 @@ export interface ServiceRecord {
 }
 
 /**
+ * Something the rider noticed and wants looked at — a rattle, a spongy lever, a weeping
+ * seal. Kept so it is still there weeks later when the bike finally reaches a workshop,
+ * and closed against the service that dealt with it.
+ */
+export interface Issue {
+  id: string;
+  motorcycle_id: string;
+  user_id: string;
+  title: string;
+  details?: string;
+  /** The rider's own judgement: watch it, see to it soon, or it affects riding now. */
+  severity: 'watch' | 'soon' | 'urgent';
+  noted_odometer?: number | null;
+  noted_at: string;
+  status: 'open' | 'fixed';
+  fixed_at?: string | null;
+  fixed_by_service_id?: string | null;
+  fix_notes?: string | null;
+  motorcycles?: { brand: string; model: string };
+}
+
+/**
  * Paperwork the rider tracks the *expiry* of. No file is stored — see the note in
  * backend/src/routes/documents.ts.
  */

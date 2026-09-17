@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { Motorcycle, ServiceRecord } from '../../types';
+import { Issue, Motorcycle, ServiceRecord } from '../../types';
 import { Button, Input, Select, Textarea, Modal } from '../ui';
 import { formatCurrency } from '../../lib/utils';
 
@@ -72,6 +72,23 @@ export default function ServiceFormModal({
     queryKey: ['bikes'], queryFn: () => api.get('/bikes'), enabled: open,
   });
 
+  /*
+   * The issues the rider noted on this bike, offered to tick off.
+   *
+   * This is the point of keeping the log: a note written weeks ago on the roadside is
+   * only useful if it resurfaces at the moment the bike is actually being worked on.
+   * Ticking one closes it against this service, so the history records what was wrong
+   * as well as what was replaced.
+   */
+  const [resolving, setResolving] = useState<Set<string>>(new Set());
+  const { data: openIssues } = useQuery<Issue[]>({
+    queryKey: ['issues', form.motorcycle_id, 'open'],
+    queryFn: () => api.get(`/issues?motorcycle_id=${form.motorcycle_id}&status=open`),
+    enabled: open && !!form.motorcycle_id,
+  });
+  // A different bike has a different list; never carry ticks across.
+  useEffect(() => { setResolving(new Set()); }, [form.motorcycle_id, open]);
+
   // Reload the form each time the sheet opens, so a cancelled edit leaves nothing behind
   // and the next one starts from what is actually stored.
   useEffect(() => {
@@ -89,11 +106,15 @@ export default function ServiceFormModal({
         qc.invalidateQueries({ queryKey: key });
       }
       if (editing) qc.invalidateQueries({ queryKey: ['service', record!.id] });
-      // Say what the service reset, so the rider trusts that it happened.
+      qc.invalidateQueries({ queryKey: ['issues'] });
+      // Say what the service reset and what it closed, so the rider trusts it happened.
       const updated: string[] = saved?.maintenance_updated ?? [];
-      if (updated.length) {
-        alert(`Service saved.\n\nMaintenance updated automatically:\n• ${updated.join('\n• ')}`);
-      }
+      const closed: string[] = saved?.issues_closed ?? [];
+      const lines = [
+        updated.length ? `Maintenance updated automatically:\n• ${updated.join('\n• ')}` : '',
+        closed.length ? `Issues closed:\n• ${closed.join('\n• ')}` : '',
+      ].filter(Boolean);
+      if (lines.length) alert(`Service saved.\n\n${lines.join('\n\n')}`);
       onClose();
     },
     onError: (e: Error) => setError(e.message),
@@ -117,6 +138,7 @@ export default function ServiceFormModal({
       labour_cost: parseFloat(form.cost) || 0,
       service_type: form.service_type,
       notes: form.notes || undefined,
+      resolved_issue_ids: [...resolving],
       parts: form.parts
         .filter(p => p.part_name.trim())
         .map(p => ({
@@ -159,6 +181,32 @@ export default function ServiceFormModal({
                onChange={e => setForm(f => ({ ...f, workshop: e.target.value }))} />
         <Textarea label="Notes" placeholder="What was done…" rows={2} value={form.notes}
                   onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+
+        {!!openIssues?.length && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-ink">Issues you noted</p>
+            <p className="text-muted text-[11px] -mt-1">Tick anything this visit dealt with.</p>
+            {openIssues.map(issue => (
+              <label key={issue.id}
+                     className="flex items-start gap-2 p-2.5 bg-surface2 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-accent"
+                  checked={resolving.has(issue.id)}
+                  onChange={e => setResolving(prev => {
+                    const next = new Set(prev);
+                    if (e.target.checked) next.add(issue.id); else next.delete(issue.id);
+                    return next;
+                  })}
+                />
+                <span className="min-w-0">
+                  <span className="block text-ink text-sm">{issue.title}</span>
+                  {issue.details && <span className="block text-muted text-[11px]">{issue.details}</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-ink">Parts Replaced</p>
