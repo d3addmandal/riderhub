@@ -9,6 +9,7 @@
 // Static checks: Caddy cannot run here. The live site is the real proof —
 // `node tests/phase37.mjs https://<domain>`, which the deploy workflow runs for us.
 import { readFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 
 const CADDY = 'deploy/Caddyfile';
 let pass = 0, fail = 0; const fails = [];
@@ -16,6 +17,10 @@ const check = (n, c, d) => c ? (pass++, console.log(`  PASS  ${n}`))
   : (fail++, fails.push(n), console.log(`  FAIL  ${n}${d ? ` — ${d}` : ''}`));
 
 const caddy = existsSync(CADDY) ? readFileSync(CADDY, 'utf8') : '';
+const gitTracked = (() => {
+  try { return execSync('git ls-files', { encoding: 'utf8' }).trim().split(/\r?\n/); }
+  catch { return []; }
+})();
 const hosting = JSON.parse(readFileSync('firebase.json', 'utf8')).hosting;
 const ruleFor = (src) => Object.fromEntries((hosting.headers.find(h => h.source === src)?.headers ?? [])
   .map(h => [h.key.toLowerCase(), h.value]));
@@ -99,6 +104,15 @@ check('it stops at the first error instead of carrying on', /set -euo pipefail/.
 check('it pulls from GitHub on a normal run', /pull --ff-only/.test(run));
 check('--no-pull exists for rebuilding what is already there', /--no-pull/.test(run));
 check('it explains deploy keys when a private pull is refused', /Deploy keys/.test(run));
+// The box builds inside its checkout, so every deploy leaves build output behind. If any
+// of it were tracked, the next pull would refuse and the deploy would stop dead.
+check('no build output is tracked in git',
+  !gitTracked.some(f => /\.tsbuildinfo$|(^|\/)dist\//.test(f)),
+  gitTracked.filter(f => /\.tsbuildinfo$|(^|\/)dist\//.test(f)).join(', '));
+check('the build cache is ignored', /\*\.tsbuildinfo/.test(readFileSync('.gitignore', 'utf8')));
+check('a pull blocked only by build output clears it and retries',
+  run.includes('would be overwritten by') && /Discarding build output/.test(run));
+check('but a pull blocked by a real edit still stops', /grep -qvE/.test(run));
 check('it builds both halves', /backend"\s+run build/.test(run) && /frontend" run build/.test(run));
 check('it installs devDependencies, which the build itself needs', !/--omit=dev/.test(run));
 

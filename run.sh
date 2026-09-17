@@ -354,7 +354,26 @@ if [[ $PULL -eq 1 && -d "$APP_DIR/.git" ]]; then
   git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$APP_DIR" \
     || git config --global --add safe.directory "$APP_DIR"
 
-  if ! PULL_OUT=$(git -C "$APP_DIR" pull --ff-only 2>&1); then
+  PULL_OK=0
+  PULL_OUT=$(git -C "$APP_DIR" pull --ff-only 2>&1) && PULL_OK=1
+
+  # The box builds inside its own checkout, so a pull can be blocked by files the build
+  # itself just wrote. Those hold nothing anyone wants to keep. Discard exactly those and
+  # try once more, rather than sending someone to `reset --hard` over a compiler cache.
+  if (( ! PULL_OK )) && [[ "$PULL_OUT" == *"would be overwritten by"* ]]; then
+    BLOCKED=$(sed -n '/would be overwritten by/,/^Please commit/p' <<<"$PULL_OUT" \
+      | sed -e '1d' -e '$d' -e 's/^[[:space:]]*//' | grep -v '^$' || true)
+    if [[ -n "$BLOCKED" ]] && ! grep -qvE '(\.tsbuildinfo$|(^|/)dist/|(^|/)node_modules/)' <<<"$BLOCKED"; then
+      say "Discarding build output that was blocking the pull"
+      sed 's/^/    /' <<<"$BLOCKED"
+      while IFS= read -r f; do
+        [[ -n "$f" ]] && git -C "$APP_DIR" checkout -- "$f" 2>/dev/null || true
+      done <<<"$BLOCKED"
+      PULL_OUT=$(git -C "$APP_DIR" pull --ff-only 2>&1) && PULL_OK=1
+    fi
+  fi
+
+  if (( ! PULL_OK )); then
     echo "$PULL_OUT"
     # Say what git actually said, then what to do about that specific thing. Guessing a
     # single cause here once sent someone hunting for a credentials problem when the
